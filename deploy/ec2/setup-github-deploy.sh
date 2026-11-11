@@ -27,11 +27,14 @@ fi
 SG="$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" --query 'SecurityGroups[0].GroupId' --output text)"
 [ "$SG" != None ] || { echo "!! No $SG_NAME security group. Run ./deploy/ec2/launch.sh first."; exit 1; }
 
+# GitHub's OIDC "sub" prefix: classic repo:owner/name, or the immutable repo:owner@id/name@id format.
+SUB_PREFIX="$(gh api "repos/$REPO/actions/oidc/customization/sub" -q 'if .use_immutable_subject then .sub_claim_prefix else empty end' 2>/dev/null || true)"
+SUB_PREFIX="${SUB_PREFIX:-repo:$REPO}"
 TRUST=$(cat <<EOF
 {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"$OIDC_ARN"},
  "Action":"sts:AssumeRoleWithWebIdentity","Condition":{
   "StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com",
-                  "token.actions.githubusercontent.com:sub":"repo:$REPO:ref:refs/heads/master"}}}]}
+                  "token.actions.githubusercontent.com:sub":"$SUB_PREFIX:ref:refs/heads/master"}}}]}
 EOF
 )
 POLICY=$(cat <<EOF
