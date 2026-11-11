@@ -2,7 +2,7 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, ArrowUp, Bot, Eye, EyeOff, Loader2, Lock, Mail, User, X } from "lucide-react";
+import { ArrowRight, ArrowUp, Bot, Loader2, X } from "lucide-react";
 import HeroDemo from "@/components/HeroDemo";
 import { useAuth } from "@/lib/auth";
 import { Logo } from "@/components/AppShell";
@@ -261,7 +261,7 @@ function HomePage() {
         </div>
       </footer>
 
-      {auth && <AuthDialog mode={auth} onMode={setAuth} onClose={() => setAuth(null)} />}
+      {auth && <AuthDialog mode={auth} onClose={() => setAuth(null)} />}
     </div>
   );
 }
@@ -367,20 +367,15 @@ function FooterCol({ title, children }: { title: string; children: ReactNode }) 
 
 /* ------------------------------------------------------------------ auth card */
 
-function AuthDialog({ mode, onMode, onClose }: { mode: "login" | "register"; onMode: (m: "login" | "register") => void; onClose: () => void }) {
-  const { signIn } = useAuth();
-  const router = useRouter();
-  const emailRef = useRef<HTMLInputElement>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [show, setShow] = useState(false);
+function AuthDialog({ mode, onClose }: { mode: "login" | "register"; onClose: () => void }) {
+  const { signInWithGitHub } = useAuth();
+  const btnRef = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const register = mode === "register";
 
   useEffect(() => {
-    emailRef.current?.focus();
+    btnRef.current?.focus();
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -388,66 +383,40 @@ function AuthDialog({ mode, onMode, onClose }: { mode: "login" | "register"; onM
     return () => { window.removeEventListener("keydown", esc); document.body.style.overflow = prev; };
   }, [onClose]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function github() {
     setError(""); setBusy(true);
-    try { await signIn(mode, email, password, name || undefined); router.replace("/dashboard"); }
-    catch (err) { setError(err instanceof Error ? err.message : "Something went wrong"); }
-    finally { setBusy(false); }
+    // On success the browser leaves for GitHub, so busy stays on until the page changes.
+    try { await signInWithGitHub("/dashboard"); }
+    catch (err) { setError(err instanceof Error ? err.message : "Couldn't start GitHub sign-in"); setBusy(false); }
   }
 
   return (
     <div className="fade fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-labelledby="auth-title">
-      <form onSubmit={submit} className="pop relative w-full max-w-[420px] rounded-[24px] border border-sep bg-card p-7 shadow-[var(--shadow-lg)] sm:p-8">
+      <div className="pop relative w-full max-w-[420px] rounded-[24px] border border-sep bg-card p-7 shadow-[var(--shadow-lg)] sm:p-8">
         <button type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full text-label3 hover:bg-fill hover:text-label"><X size={18} /></button>
         <h2 id="auth-title" className="text-[26px] font-bold tracking-[-0.02em]">{register ? "Create your account" : "Sign in"}</h2>
-        <p className="mb-6 mt-1 text-[14.5px] text-label2">{register ? "Your first challenge is ready a minute from now." : "Pick up where you left off."}</p>
+        <p className="mb-7 mt-1 text-[14.5px] text-label2">{register ? "Your first challenge is ready a minute from now." : "Pick up where you left off."}</p>
 
-        <div className="space-y-4">
-          {register && <Field icon={User} label="Name" id="name"><input id="name" className="input !pl-11" placeholder="Ada Lovelace" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></Field>}
-          <Field icon={Mail} label="Email" id="email">
-            <input ref={emailRef} id="email" type="email" className="input !pl-11" placeholder="you@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-          </Field>
-          <Field icon={Lock} label="Password" id="password" hint={register ? "6+ characters" : undefined}>
-            <input id="password" type={show ? "text" : "password"} className="input !pl-11 !pr-12" placeholder={register ? "Create a password" : "Your password"} required minLength={6}
-              value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={register ? "new-password" : "current-password"} />
-            <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"} aria-pressed={show}
-              className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-label3 hover:bg-fill hover:text-label">
-              {show ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </Field>
-        </div>
+        <button ref={btnRef} type="button" onClick={github} disabled={busy} className="btn btn-primary btn-lg w-full">
+          {busy ? <Loader2 size={18} className="animate-spin" /> : <><GitHubMark />Continue with GitHub</>}
+        </button>
 
         {error && <p role="alert" className="mt-4 rounded-xl bg-badsoft px-3.5 py-2.5 text-[13.5px] text-bad">{error}</p>}
 
-        <button className="btn btn-primary btn-lg mt-6 w-full" disabled={busy}>
-          {busy ? <Loader2 size={18} className="animate-spin" /> : <>{register ? "Create account" : "Sign in"}<ArrowRight size={18} /></>}
-        </button>
-
-        <p className="mt-5 text-center text-[14px] text-label2">
-          {register ? "Already have an account?" : "New to Codeway?"}{" "}
-          <button type="button" className="font-semibold text-label underline decoration-[var(--accent-fill)] decoration-2 underline-offset-4 hover:text-accent"
-            onClick={() => { onMode(register ? "login" : "register"); setError(""); }}>
-            {register ? "Sign in" : "Create an account"}
-          </button>
+        <p className="mt-5 text-center text-[13px] leading-relaxed text-label3">
+          {register ? "New here? Your account is created the first time you continue." : "First time? Continuing creates your account."}
+          {" "}Codeway reads your GitHub name, email and avatar, nothing else.
         </p>
-      </form>
+      </div>
     </div>
   );
 }
 
-function Field({ icon: Icon, label, id, hint, children }: { icon: typeof Mail; label: string; id: string; hint?: string; children: ReactNode }) {
+function GitHubMark() {
   return (
-    <div>
-      <div className="mb-1.5 flex items-baseline justify-between">
-        <label htmlFor={id} className="text-[13px] font-semibold">{label}</label>
-        {hint && <span className="text-xs text-label3">{hint}</span>}
-      </div>
-      <div className="relative">
-        <Icon aria-hidden size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-label3" />
-        {children}
-      </div>
-    </div>
+    <svg aria-hidden viewBox="0 0 16 16" width="18" height="18" fill="currentColor">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+    </svg>
   );
 }

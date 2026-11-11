@@ -23,7 +23,6 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private final Map<String, Deque<Long>> hits = new ConcurrentHashMap<>();
 
     private static Rule ruleFor(String method, String path) {
-        if (path.startsWith("/api/auth/login") || path.startsWith("/api/auth/register")) return new Rule("auth", 10, 60_000);
         if (!"POST".equals(method) && !path.startsWith("/api/lessons")) return null;
         if (path.equals("/api/run")) return new Rule("run", 30, 60_000);
         if (path.endsWith("/submit")) return new Rule("submit", 12, 60_000);

@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# End-to-end check against a running backend: health, sign-up, a challenge, and a sandboxed test run.
-#   ./deploy/ec2/smoke-test.sh http://<public-ip>:8080
+# End-to-end check against a running backend: health, auth enforcement and, with a token, a sandboxed test run.
+#   ./deploy/ec2/smoke-test.sh https://<backend-host>
+#   TOKEN=<supabase access token> ./deploy/ec2/smoke-test.sh https://<backend-host>
+# Sign-in is GitHub only, so a token has to come from a real session: sign in on the site, then in the browser
+# console run:  JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.endsWith("-auth-token")))).access_token
 set -euo pipefail
-API="${1:?usage: smoke-test.sh http://<host>:8080}/api"
+API="${1:?usage: smoke-test.sh https://<backend-host>}/api"
 json() { python3 -c "import sys,json; d=json.load(sys.stdin); print($1)"; }
 
 echo -n "health: "; curl -fs "$API/health"; echo
-EMAIL="smoke-$(date +%s)@test.dev"
-TOKEN=$(curl -fs -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"email\":\"$EMAIL\",\"password\":\"smoke-test-1\"}" | json 'd["token"]')
-echo "signed up: $EMAIL"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/auth/me" -H "Authorization: Bearer not-a-real-token")
+echo "forged token -> $CODE (expect 401)"; [ "$CODE" = 401 ]
+if [ -z "${TOKEN:-}" ]; then echo "No TOKEN set: skipping the sandbox run."; exit 0; fi
+echo "signed in as: $(curl -fs "$API/auth/me" -H "Authorization: Bearer $TOKEN" | json 'd["email"]')"
 START=$(curl -fs -X POST "$API/challenges/next" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"language":"java","concept":"polymorphism"}')
 ID=$(echo "$START" | json 'd["attemptId"]'); echo "challenge: $(echo "$START" | json 'd["challenge"]["title"]') (attempt $ID)"
 BODY=$(echo "$START" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps({'attemptId': d['attemptId'], 'files': d['challenge']['files'], 'mode': 'tests'}))")

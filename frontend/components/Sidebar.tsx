@@ -89,7 +89,10 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
           </button>
         )}
         <div className={`flex items-center ${collapsed ? "flex-col gap-2" : "gap-2.5 pt-1"}`}>
-          <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-bold" style={{ background: "var(--accent-fill)", color: "var(--accent-ink)" }}>{initial}</span>
+          {user?.avatarUrl
+            // eslint-disable-next-line @next/next/no-img-element -- tiny remote avatar; no need for the image optimizer
+            ? <img src={user.avatarUrl} alt="" aria-hidden width={32} height={32} referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+            : <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-bold" style={{ background: "var(--accent-fill)", color: "var(--accent-ink)" }}>{initial}</span>}
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-semibold leading-tight">{user?.displayName}</p>

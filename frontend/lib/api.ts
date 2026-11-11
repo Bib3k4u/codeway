@@ -1,6 +1,8 @@
+import { supabase } from "./supabase";
+
 export type Files = Record<string, string>;
 
-export interface User { id: number; email: string; displayName: string; preferredLanguage?: string }
+export interface User { id: number; email: string; displayName: string; preferredLanguage?: string; avatarUrl?: string }
 export interface ConceptRow {
   id: string; title: string; summary: string; symbol: string;
   available: boolean; inProgress: boolean; practice?: boolean; progress: number; score: number; streak: number; mastered: boolean; attempts: number;
@@ -32,19 +34,27 @@ export interface SubmitResp extends RunResp {
 }
 export interface Hint { level: number; maxLevel: number; kind: "nudge" | "concept" | "code" | "solution"; text: string; cost: string; files?: Files }
 
-const KEY = "codeway_token";
-export const tokenStore = {
-  get(): string | null { try { return localStorage.getItem(KEY); } catch { return null; } },
-  set(t: string) { try { localStorage.setItem(KEY, t); } catch {} },
-  clear() { try { localStorage.removeItem(KEY); } catch {} },
-};
+/**
+ * Supabase access token for API calls. getSession() returns the stored session and refreshes it first when it is
+ * about to expire. The last token is also kept in memory for the synchronous save on tab close.
+ */
+let lastToken: string | null = null;
+export async function accessToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  try {
+    const { data } = await supabase().auth.getSession();
+    lastToken = data.session?.access_token ?? null;
+  } catch { lastToken = null; }
+  return lastToken;
+}
+export function rememberToken(t: string | null) { lastToken = t; }
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
 export async function api<T>(path: string, body?: unknown, method?: string): Promise<T> {
-  const token = tokenStore.get();
+  const token = await accessToken();
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {
@@ -53,9 +63,8 @@ export async function api<T>(path: string, body?: unknown, method?: string): Pro
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError("Can't reach the server. Is the backend running on port 8080?", 0);
+    throw new ApiError("Can't reach the server. Check your connection and try again.", 0);
   }
-  if (res.status === 401 && token) tokenStore.clear();
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
   return data as T;
@@ -63,7 +72,7 @@ export async function api<T>(path: string, body?: unknown, method?: string): Pro
 
 /** Best-effort save that survives the tab closing. */
 export function saveDraftOnExit(attemptId: number, files: Files) {
-  const token = tokenStore.get();
+  const token = lastToken;
   if (!token) return;
   try {
     fetch(`/api/attempts/${attemptId}/draft`, {

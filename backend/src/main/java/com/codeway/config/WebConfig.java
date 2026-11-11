@@ -2,8 +2,7 @@ package com.codeway.config;
 
 import com.codeway.auth.AuthInterceptor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.*;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.*;
 
 @Configuration
@@ -16,7 +15,7 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry r) {
-        r.addInterceptor(auth).addPathPatterns("/api/**").excludePathPatterns("/api/auth/register", "/api/auth/login", "/api/health");
+        r.addInterceptor(auth).addPathPatterns("/api/**").excludePathPatterns("/api/health");
         r.addInterceptor(rateLimit).addPathPatterns("/api/**");
     }
 
@@ -24,6 +23,4 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry r) {
         r.addMapping("/api/**").allowedOriginPatterns(corsOrigins).allowedMethods("*").allowedHeaders("*");
     }
-
-    @Bean BCryptPasswordEncoder encoder() { return new BCryptPasswordEncoder(); }
 }

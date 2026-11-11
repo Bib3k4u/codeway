@@ -27,7 +27,7 @@ Python/JavaScript appear in the UI as "Coming soon" and plug into the same runne
 ### M1: Backend skeleton
 - [x] Spring Boot project, Postgres connection from `.env`
 - [x] Entities: users, concept_mastery, lessons, challenges, attempts, events
-- [x] Auth endpoints (`/api/auth/register|login|me`) and token filter
+- [x] Auth: GitHub sign-in through Supabase Auth; backend verifies Supabase JWTs (ES256, public JWKS) and links users by email
 - **Done when:** backend compiles and boots against Postgres.
 
 ### M2: Java execution engine
@@ -83,5 +83,5 @@ Python/JavaScript appear in the UI as "Coming soon" and plug into the same runne
 | `AI_API_VERSION` | set for Azure (e.g. `2024-10-21`); leave empty for plain OpenAI |
 | `AI_MODEL` | Azure deployment name or OpenAI model for lessons/challenges |
 | `AI_HINT_MODEL` | cheaper model for hints (defaults to `AI_MODEL`) |
-| `AUTH_SECRET` | token signing secret |
+| `SUPABASE_URL` | Supabase project whose access tokens the backend accepts (public value) |
 | `RUNNER_MODE` | `local` (default) |

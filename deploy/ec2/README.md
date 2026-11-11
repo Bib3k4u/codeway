@@ -35,10 +35,9 @@ Neon accepts connections from anywhere by default. If you enabled an IP allow li
 
 ```bash
 cp deploy/ec2/codeway.env.example deploy/ec2/codeway.env   # git-ignored
-openssl rand -hex 32                                       # paste as AUTH_SECRET
 ```
 
-Fill in `DB_URL` (your Neon string), the `AI_*` values from your local `.env`, and `AUTH_SECRET`.
+Fill in `DB_URL` (your Neon string) and the `AI_*` values from your local `.env`.
 On a `t3.micro` keep `RUNNER_MAX_CONCURRENT=1`; on a `t3.small` use `2`.
 
 ## 3. Deploy
@@ -93,7 +92,9 @@ BACKEND_URL=http://<public-ip>:8080 npm run dev
   `--memory 512m`, `--pids-limit 128`, 1 CPU; only the run's own temp folder is mounted.
 - **Concurrency cap:** at most `RUNNER_MAX_CONCURRENT` runs at once; others wait up to 45 s.
 - **Rate limits per user:** 30 runs, 12 submits, 10 hints, 8 new challenges and 20 lessons per minute; 10 sign-in attempts per minute per IP.
-- **Prod profile:** refuses to start with a weak `AUTH_SECRET`, and hides internal error details from responses.
+- **Sign-in:** GitHub through Supabase Auth. The backend accepts only Supabase access tokens signed with the
+  project's asymmetric key (checked against its public JWKS), so it holds no signing secret.
+- **Prod profile:** hides internal error details from responses.
 
 Known limits for a test server: the `codeway` user is in the `docker` group (equivalent to root on this box),
 rate limits are in memory (reset on restart), and the schema is managed by Hibernate `ddl-auto=update`.

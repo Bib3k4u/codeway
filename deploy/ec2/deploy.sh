@@ -30,8 +30,8 @@ if [ -f /tmp/codeway-deploy/codeway.env ]; then
 fi
 install -o codeway -g codeway -m 644 /tmp/codeway-deploy/codeway-backend.jar /opt/codeway/codeway-backend.jar
 rm -rf /tmp/codeway-deploy
-if ! grep -qE '^AUTH_SECRET=.{32,}' /opt/codeway/codeway.env; then
-  echo "!! /opt/codeway/codeway.env has no AUTH_SECRET yet. Fill it in (sudo nano /opt/codeway/codeway.env), then: sudo systemctl restart codeway"
+if ! grep -qE '^DB_URL=.+' /opt/codeway/codeway.env; then
+  echo "!! /opt/codeway/codeway.env has no DB_URL yet. Fill it in (sudo nano /opt/codeway/codeway.env), then: sudo systemctl restart codeway"
   exit 0
 fi
 systemctl restart codeway
