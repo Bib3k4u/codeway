@@ -9,21 +9,26 @@ import Ring from "@/components/Ring";
 import { api, type ConceptRow, type HistoryRow, type Lesson } from "@/lib/api";
 import { buildToc } from "@/lib/toc";
 import { useAuth } from "@/lib/auth";
-import { isLang, langLabel, LANGS, recordVisit, type LangId } from "@/lib/lang";
+import { isLang, langLabel, LANGS, type LangId } from "@/lib/lang";
+import { useTracks } from "@/lib/tracks";
 
 export default function LessonPage() {
   return <Suspense fallback={null}><LessonRoute /></Suspense>;
 }
 
-/** Picks the language: ?lang= in the URL, else the one this learner visits most, else Java. */
+/**
+ * Picks the language: ?lang= in the URL, else the one this learner last chose, else Java. Waits for the profile so
+ * only the chosen language's lesson is fetched; other languages load only when their tab is opened.
+ */
 function LessonRoute() {
   const { concept } = useParams<{ concept: string }>();
   const search = useSearchParams();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, loading, setLanguage } = useAuth();
   const q = search.get("lang");
-  const lang: LangId = isLang(q) ? q : isLang(user?.preferredLanguage) ? user.preferredLanguage : "java";
-  const setLang = (l: LangId) => router.replace(`/learn/${concept}?lang=${l}`, { scroll: false });
+  const lang: LangId | null = isLang(q) ? q : loading ? null : isLang(user?.preferredLanguage) ? user.preferredLanguage : "java";
+  if (!lang) return null;
+  const setLang = (l: LangId) => { setLanguage(l); router.replace(`/learn/${concept}?lang=${l}`, { scroll: false }); };
   return <LessonView key={lang} concept={concept} lang={lang} onLang={setLang} />;
 }
 
@@ -33,9 +38,9 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [error, setError] = useState("");
   const [activeId, setActiveId] = useState("");
+  const tracks = useTracks();
 
   useEffect(() => {
-    recordVisit(lang);
     api<Lesson>(`/lessons?language=${lang}&concept=${concept}`).then(setLesson).catch((e) => setError(e.message));
     api<HistoryRow[]>(`/attempts/history?language=${lang}&concept=${concept}`).then(setHistory).catch(() => {});
     api<ConceptRow[]>(`/mastery?language=${lang}`).then((r) => setRow(r.find((x) => x.id === concept) ?? null)).catch(() => {});
@@ -76,14 +81,17 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
     history_replace(id); setActiveId(id);
   };
 
-  const canPractice = LANGS.find((l) => l.id === lang)?.practice ?? false;
-  const cta = !canPractice ? "Practice in Java" : row?.inProgress ? "Continue challenge" : row && row.attempts > 0 ? "Next challenge" : "Start challenge";
+  const canPractice = lesson?.practice ?? row?.practice ?? false;
+  const trackId = lesson?.track ?? row?.track;
+  const trackTitle = tracks.find((t) => t.id === trackId)?.title;
+  const cta = row?.inProgress ? "Continue challenge" : row && row.attempts > 0 ? "Next challenge" : "Start challenge";
+  const practiceHref = `/learn/${concept}/practice?lang=${lang}`;
   const current = activeId || toc[0]?.id;
 
   return (
     <AppShell wide
-      crumb={<span className="flex items-center gap-1.5"><Link href="/dashboard" className="navlink hover:text-label">{langLabel(lang)}</Link><ChevronRight size={13} className="text-label3" /><span className="font-medium text-label">{row?.title ?? lesson?.title ?? "Lesson"}</span></span>}
-      actions={<Link href={`/learn/${concept}/practice`} className="btn btn-primary btn-sm max-sm:hidden">{cta}<ArrowRight size={14} /></Link>}
+      crumb={<span className="flex items-center gap-1.5"><Link href="/dashboard" className="navlink hover:text-label">{trackTitle ?? langLabel(lang)}</Link><ChevronRight size={13} className="text-label3" /><span className="font-medium text-label">{row?.title ?? lesson?.title ?? "Lesson"}</span></span>}
+      actions={canPractice ? <Link href={practiceHref} className="btn btn-primary btn-sm max-sm:hidden">{cta}<ArrowRight size={14} /></Link> : undefined}
     >
       <div className="grid gap-10 lg:grid-cols-[250px_minmax(0,1fr)]">
         {/* contents */}
@@ -108,7 +116,14 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
         </nav>
         {/* progress rail */}
         <aside className="space-y-4">
-          <div className="card p-5">
+          {!canPractice && lesson && (
+            <div className="card p-5">
+              <p className="eyebrow mb-2">{trackTitle ?? "This track"}</p>
+              <p className="text-[14px] font-semibold tracking-tight">Practice is coming soon</p>
+              <p className="mt-1.5 text-[13px] leading-snug text-label2">Read the lesson for now. Auto-graded challenges for this track are next on the roadmap.</p>
+            </div>
+          )}
+          {canPractice && <div className="card p-5">
             <div className="mb-4 flex items-center gap-4">
               <Ring value={row?.progress ?? 0} mastered={row?.mastered} size={60} stroke={6} />
               <div>
@@ -118,8 +133,8 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
               </div>
             </div>
             <p className="mb-4 flex items-start gap-2 text-[13px] leading-snug text-label2"><Flame size={14} className="mt-0.5 shrink-0 text-accent" />Pass 3 challenges in a row, at your level, without hints.</p>
-            <Link href={`/learn/${concept}/practice`} className="btn btn-primary w-full">{cta}<ArrowRight size={15} /></Link>
-          </div>
+            <Link href={practiceHref} className="btn btn-primary w-full">{cta}<ArrowRight size={15} /></Link>
+          </div>}
           {history.length > 0 && (
             <div className="card p-5">
               <h2 className="eyebrow mb-3">History</h2>
@@ -152,17 +167,17 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
             </div>
             <h1 className="display text-[56px]">{row?.title ?? lesson?.title ?? " "}</h1>
             {row && <p className="mt-1.5 text-[17px] text-label2">{row.summary}</p>}
-            {!canPractice && <p className="mt-3 inline-flex rounded-full bg-fill px-3 py-1.5 text-[13px] text-label2">{langLabel(lang)} challenges are coming soon. Practice runs in Java for now.</p>}
+            {trackTitle && <p className="mt-3 inline-flex rounded-full bg-fill px-3 py-1.5 text-[13px] text-label2">{trackTitle}{canPractice ? "" : " · practice coming soon"}</p>}
           </header>
           <article className="card rise px-6 py-8 sm:px-10 sm:py-10" style={{ animationDelay: "60ms" }}>
             {error ? <p role="alert" className="text-bad">{error}</p>
               : !lesson ? <div className="space-y-3"><div className="skeleton h-6 w-1/2" /><div className="skeleton h-4 w-full" /><div className="skeleton h-4 w-5/6" /><div className="skeleton h-40 w-full" /></div>
               : (<>{toc[0]?.id === "introduction" && <span id="introduction" className="block scroll-mt-[72px]" />}<Markdown toc={toc}>{lesson.contentMd}</Markdown></>)}
           </article>
-          {lesson && (
+          {lesson && canPractice && (
             <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-sep bg-card2 px-6 py-5">
               <div><p className="display text-[24px]">Ready to try it?</p><p className="text-sm text-label2">Put this lesson into practice with a challenge at your level.</p></div>
-              <Link href={`/learn/${concept}/practice`} className="btn btn-primary">{cta}<ArrowRight size={16} /></Link>
+              <Link href={practiceHref} className="btn btn-primary">{cta}<ArrowRight size={16} /></Link>
             </div>
           )}
         </div>

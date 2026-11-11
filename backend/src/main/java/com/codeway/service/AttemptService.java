@@ -31,9 +31,11 @@ public class AttemptService {
 
     // ---- start or resume ----
     public Map<String, Object> start(Long userId, String language, String concept) {
-        catalog.find(language, concept).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Unknown concept"));
-        if (!ConceptCatalog.PRACTICE.contains(language))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ConceptCatalog.label(language) + " challenges are coming soon. Practice runs in Java for now.");
+        var c = catalog.find(language, concept).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Unknown concept"));
+        if (!catalog.practiceOpen(language, concept)) {
+            String track = catalog.track(c.track()).map(ConceptCatalog.Track::title).orElse("This track");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Practice for " + track + " is coming soon. Read the lesson for now.");
+        }
         ConceptMastery m = mastery.get(userId, language, concept);
 
         // Resume unfinished work on this topic, however long ago it was left.
@@ -61,12 +63,13 @@ public class AttemptService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("attemptId", a.id);
         out.put("resumed", resumed);
-        out.put("challenge", Map.of(
-                "id", ch.id, "title", ch.title, "descriptionMd", ch.descriptionMd,
-                "difficulty", ch.difficulty, "scaffolding", ch.scaffolding, "expectedMinutes", ch.expectedMinutes,
-                "files", ChallengeService.starterWithMain(Json.files(ch.starterFilesJson)),
-                "testNames", ChallengeService.testNames(ch),
-                "sampleOutput", challengeService.sampleOutput(ch)));
+        out.put("challenge", Map.ofEntries(
+                Map.entry("id", ch.id), Map.entry("title", ch.title), Map.entry("descriptionMd", ch.descriptionMd),
+                Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
+                Map.entry("language", ch.language),
+                Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
+                Map.entry("testNames", ChallengeService.testNames(ch)),
+                Map.entry("sampleOutput", challengeService.sampleOutput(ch))));
         if (resumed) {
             if (a.draftFilesJson != null) out.put("draft", Json.files(a.draftFilesJson));
             out.put("hints", Json.list(a.hintsJson));
@@ -118,7 +121,8 @@ public class AttemptService {
         Attempt a = owned(userId, attemptId);
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
         boolean tests = "tests".equalsIgnoreCase(modeName);
-        RunResult r = runner.run(files, tests ? Json.files(ch.testsJson) : Map.of(), tests ? CodeRunner.Mode.TESTS : CodeRunner.Mode.MAIN);
+        RunResult r = runner.run(ch.language, files, tests ? Json.files(ch.testsJson) : Map.of(), tests ? CodeRunner.Mode.TESTS : CodeRunner.Mode.MAIN);
+        if (tests) r = ChallengeService.withAllTests(ch, r);
         a.runs++;
         if (!r.compiled()) a.compileErrors++;
         else if (r.runtimeError() || r.timedOut()) a.runtimeErrors++;
@@ -142,7 +146,7 @@ public class AttemptService {
         Attempt a = owned(userId, attemptId);
         if (a.submittedAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt was already submitted");
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
-        RunResult r = runner.run(files, Json.files(ch.testsJson), CodeRunner.Mode.TESTS);
+        RunResult r = ChallengeService.withAllTests(ch, runner.run(ch.language, files, Json.files(ch.testsJson), CodeRunner.Mode.TESTS));
 
         int expected = Json.files(ch.testsJson).values().stream().mapToInt(s -> countOf(s, "Check.run(")).sum();
         int total = Math.max(expected, r.total());
@@ -250,13 +254,13 @@ public class AttemptService {
                 String levelRule = switch (level) {
                     case 1 -> "Give a NUDGE: one short guiding question that redirects the learner's thinking. Do not reveal the answer or write code.";
                     case 2 -> "Give a CONCEPTUAL hint: explain the OOP idea that unlocks the problem in 2-4 sentences. No code.";
-                    default -> "Give PARTIAL CODE: a small Java snippet (max 8 lines) for the single most blocking step. Do not provide the whole solution.";
+                    default -> "Give PARTIAL CODE: a small " + ConceptCatalog.label(ch.language) + " snippet (max 8 lines) for the single most blocking step. Do not provide the whole solution.";
                 };
                 StringBuilder sb = new StringBuilder("Challenge:\n").append(ch.descriptionMd).append("\n\nLearner's current files:\n");
                 if (files != null) files.forEach((k, v) -> sb.append("--- ").append(k).append("\n").append(v, 0, Math.min(v.length(), 2500)).append("\n"));
                 if (failures != null && !failures.isBlank()) sb.append("\nLatest failing tests:\n").append(failures, 0, Math.min(failures.length(), 1200));
                 return ai.chat(ai.hintModel(),
-                        "You are a patient Java tutor giving one hint at a time. Markdown allowed. Be brief and encouraging. " + levelRule,
+                        "You are a patient " + ConceptCatalog.label(ch.language) + " tutor giving one hint at a time. Markdown allowed, with ```" + ch.language + " code fences. Be brief and encouraging. " + levelRule,
                         sb.toString(), false).trim();
             } catch (Exception e) {
                 System.err.println("[hint] AI failed, using stored hint: " + e.getMessage());

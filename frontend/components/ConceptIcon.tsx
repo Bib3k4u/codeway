@@ -1,4 +1,7 @@
-import { Box, GitBranch, Layers, Lock, Plug, Shapes, type LucideIcon } from "lucide-react";
+import {
+  ArrowDownUp, ArrowLeftRight, ArrowUpDown, Bell, Blocks, BookOpen, Box, Building2, Car, CircleDot, Compass, DoorOpen, Factory,
+  Gauge, GitBranch, Layers, Lock, Plug, Route, Shapes, Split, Target, Terminal, ToggleRight, type LucideIcon,
+} from "lucide-react";
 
 type Tone = "accent" | "warn" | "ok";
 const map: Record<string, { icon: LucideIcon; tone: Tone }> = {
@@ -8,6 +11,16 @@ const map: Record<string, { icon: LucideIcon; tone: Tone }> = {
   shapes: { icon: Shapes, tone: "accent" },
   layers: { icon: Layers, tone: "warn" },
   plug: { icon: Plug, tone: "ok" },
+  // SOLID
+  target: { icon: Target, tone: "accent" }, door: { icon: DoorOpen, tone: "accent" }, swap: { icon: ArrowLeftRight, tone: "accent" },
+  split: { icon: Split, tone: "accent" }, invert: { icon: ArrowDownUp, tone: "accent" },
+  // design patterns
+  one: { icon: CircleDot, tone: "accent" }, factory: { icon: Factory, tone: "accent" }, blocks: { icon: Blocks, tone: "accent" },
+  facade: { icon: Building2, tone: "accent" }, route: { icon: Route, tone: "accent" }, bell: { icon: Bell, tone: "accent" },
+  terminal: { icon: Terminal, tone: "accent" }, toggle: { icon: ToggleRight, tone: "accent" },
+  // low-level design
+  compass: { icon: Compass, tone: "accent" }, car: { icon: Car, tone: "accent" }, book: { icon: BookOpen, tone: "accent" },
+  elevator: { icon: ArrowUpDown, tone: "accent" }, gauge: { icon: Gauge, tone: "accent" },
 };
 // One brand colour: every concept tile is yellow-on-tint, like the reference site.
 const tone = { bg: "var(--accent-soft)", fg: "var(--accent)" };

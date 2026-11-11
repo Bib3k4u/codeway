@@ -13,6 +13,8 @@ public class User {
     @Column(nullable = false) public String passwordHash;
     public String displayName;
     public String avatarUrl;
+    /** Language the learner last chose (lessons and practice open in it). Null until they switch: Java. */
+    public String preferredLanguage;
     public Instant createdAt = Instant.now();
     @Column(columnDefinition = "text") public String languageVisitsJson; // {"java": 12, "python": 3}
 }

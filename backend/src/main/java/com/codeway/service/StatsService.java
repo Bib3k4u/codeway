@@ -68,7 +68,8 @@ public class StatsService {
 
         var rows = mastery.findByUserIdAndLanguage(userId, language);
         int masteredCount = (int) rows.stream().filter(m -> m.mastered).count();
-        int conceptCount = catalog.list(language).size();
+        // concepts that can be practised (and so mastered) in this language; other tracks are lessons for now
+        int conceptCount = (int) catalog.list(language).stream().filter(c -> catalog.practiceOpen(language, c.id())).count();
         // unstarted concepts count as 0 progress
         double avgScore = conceptCount == 0 ? 0 : rows.stream().filter(m -> m.attemptsCount > 0).mapToDouble(m -> m.score).sum() / conceptCount;
 

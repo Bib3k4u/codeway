@@ -14,11 +14,12 @@ const Ctx = createContext<{ stats: Stats | null; error: string; refresh: () => v
 
 export function StatsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const language = user?.preferredLanguage ?? "java";
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
   const refresh = useCallback(() => {
-    api<Stats>(`/stats?language=java&tz=${new Date().getTimezoneOffset()}`).then((s) => { setStats(s); setError(""); }).catch((e) => setError(e instanceof Error ? e.message : "Could not load your stats"));
-  }, []);
+    api<Stats>(`/stats?language=${language}&tz=${new Date().getTimezoneOffset()}`).then((s) => { setStats(s); setError(""); }).catch((e) => setError(e instanceof Error ? e.message : "Could not load your stats"));
+  }, [language]);
   useEffect(() => { if (user) refresh(); }, [user, refresh]);
   const value = useMemo(() => ({ stats: user ? stats : null, error, refresh }), [stats, error, refresh, user]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

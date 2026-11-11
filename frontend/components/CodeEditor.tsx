@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import MonacoEditor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
 import type { Diagnostic } from "@/lib/api";
+import { monacoLanguage } from "@/lib/lang";
 
 const beforeMount: BeforeMount = (monaco) => {
   // Monochrome code with yellow as the only colour, matching the app palette.
@@ -50,7 +51,7 @@ export default function CodeEditor({ path, value, onChange, diagnostics }: {
     for (const model of monaco.editor.getModels()) {
       const name = model.uri.path.replace(/^\//, "");
       const mine = diagnostics.filter((d) => d.file === name && d.line > 0 && d.line <= model.getLineCount());
-      monaco.editor.setModelMarkers(model, "javac", mine.map((d) => ({
+      monaco.editor.setModelMarkers(model, "codeway", mine.map((d) => ({
         severity: d.severity === "warning" ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error,
         message: d.message, startLineNumber: d.line, endLineNumber: d.line,
         startColumn: 1, endColumn: model.getLineMaxColumn(d.line),
@@ -61,7 +62,7 @@ export default function CodeEditor({ path, value, onChange, diagnostics }: {
 
   return (
     <MonacoEditor
-      height="100%" language="java" path={path} value={value}
+      height="100%" language={monacoLanguage(path)} path={path} value={value}
       theme={resolvedTheme === "dark" ? "codeway-dark" : "codeway-light"}
       beforeMount={beforeMount}
       onMount={(_, monaco) => { monacoRef.current = monaco; applyMarkers(); }}

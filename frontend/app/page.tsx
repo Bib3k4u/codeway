@@ -23,10 +23,10 @@ const RUN = [
 ];
 
 const TRACKS = [
-  { n: "01", title: "Object-oriented programming", status: "Open now", topics: "Classes and objects, encapsulation, inheritance, polymorphism, abstraction, interfaces" },
-  { n: "02", title: "SOLID principles", status: "Next", topics: "Single responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion" },
-  { n: "03", title: "Design patterns", status: "Planned", topics: "Singleton, factory, builder, adapter, decorator, facade, strategy, observer, command, state" },
-  { n: "04", title: "Low-level design", status: "Planned", topics: "Parking lot, elevator, library system, Splitwise, rate limiter: from requirements to classes to working code" },
+  { n: "01", title: "Object-oriented programming", status: "Practice open", topics: "Classes and objects, encapsulation, inheritance, polymorphism, abstraction, interfaces" },
+  { n: "02", title: "SOLID principles", status: "Lessons open", topics: "Single responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion" },
+  { n: "03", title: "Design patterns", status: "Lessons open", topics: "Singleton, factory, builder, adapter, decorator, facade, strategy, observer, command, state" },
+  { n: "04", title: "Low-level design", status: "Lessons open", topics: "Parking lot, elevator, library system, Splitwise, rate limiter: from requirements to classes to working code" },
 ];
 
 export default function Page() {
@@ -105,7 +105,7 @@ function HomePage() {
                 </span>
               </h1>
               <p className="mt-7 max-w-[470px] text-[18px] leading-relaxed text-label2">
-                AI-written Java challenges at your level that adapt after every submission, with hints that coach instead of solve.
+                AI-written challenges at your level, in Java, Python, JavaScript or C++, that adapt after every submission, with hints that coach instead of solve.
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-3">
                 <button className="btn btn-primary btn-lg" onClick={openAuth("register")}>Start free<ArrowRight size={18} /></button>
@@ -123,11 +123,11 @@ function HomePage() {
         {/* product */}
         <Block id="product">
           <Heading align="center" title="The whole workspace, in your browser.">
-            A real multi-file Java project with a compiler and hidden tests, generated for you and checked before you see it.
+            A real multi-file project with a compiler and hidden tests, generated for you and checked before you see it.
           </Heading>
-          <div className="mt-14"><Screenshot name="workspace" alt="The Codeway workspace: a challenge brief, a Java editor and test results with 3 of 5 tests passing" path="codeway.app/learn/polymorphism/practice" priority /></div>
+          <div className="mt-14"><Screenshot name="workspace" alt="The Codeway workspace: a challenge brief, a code editor and test results with 3 of 5 tests passing" path="codeway.app/learn/polymorphism/practice" priority /></div>
           <div className="mt-12 grid gap-8 md:grid-cols-3">
-            <Point title="A real project, not a text box">Several files, a real Java compiler, and hidden tests that run in a sandbox. Errors show up on the line that caused them.</Point>
+            <Point title="A real project, not a text box">Several files, a real compiler or interpreter, and hidden tests that run in a sandbox. Errors show up on the line that caused them.</Point>
             <Point title="Generated, then checked">Each challenge ships with its own reference solution, which has to pass every test before you see it. If it fails, the challenge is rewritten.</Point>
             <Point title="Picks up where you left off">Your code, open hints and last test run are saved as you type. Close the tab and come back next week to the same place.</Point>
           </div>
@@ -178,7 +178,7 @@ function HomePage() {
                 Look at <code className="tok-fn">describe()</code>. It calls <code className="tok-fn">area()</code> without knowing the subclass. What decides which version runs?
               </HintCard>
               <HintCard level={2} kind="Concept" cost="Medium cost">
-                Each subclass overrides <code className="tok-fn">area()</code>. In <code className="tok-fn">totalArea</code> you can call it on a <code className="tok-type">Shape</code>; Java picks the right override at runtime.
+                Each subclass overrides <code className="tok-fn">area()</code>. In <code className="tok-fn">totalArea</code> you can call it on a <code className="tok-type">Shape</code>; the right override runs at runtime, in any of the four languages.
               </HintCard>
               <HintCard level={3} kind="Partial code" cost="Large cost" dim>
                 <span className="font-mono text-[13px]"><span className="tok-kw">for</span> (<span className="tok-type">Shape</span> <span className="tok-param">s</span> : <span className="tok-param">shapes</span>) <span className="tok-param">total</span> += <span className="tok-param">s</span>.<span className="tok-fn">area</span>();</span>
@@ -215,13 +215,13 @@ function HomePage() {
                 <span className="font-mono text-[14px] text-label3">{t.n}</span>
                 <div>
                   <p className="text-[19px] font-bold tracking-tight">{t.title}</p>
-                  <p className={`mt-1 text-[13px] font-semibold ${t.status === "Open now" ? "text-accent" : "text-label3"}`}>{t.status}</p>
+                  <p className={`mt-1 text-[13px] font-semibold ${t.status === "Practice open" ? "text-accent" : "text-label2"}`}>{t.status}</p>
                 </div>
                 <p className="text-[15px] leading-relaxed text-label2">{t.topics}</p>
               </li>
             ))}
           </ol>
-          <p className="mt-6 text-[14.5px] text-label2">Taught in Java today. Python and JavaScript are being added to the same tracks.</p>
+          <p className="mt-6 text-[14.5px] text-label2">Every lesson is in Java, Python, JavaScript and C++. Practice is open for OOP; SOLID, patterns and LLD challenges come next.</p>
         </Block>
 
         {/* closing */}
@@ -245,12 +245,10 @@ function HomePage() {
             {NAV.map((n) => <li key={n.id}><a href={`#${n.id}`} onClick={goTo(n.id)} className="navlink text-label2 hover:text-label">{n.label}</a></li>)}
           </FooterCol>
           <FooterCol title="Tracks">
-            {TRACKS.map((t) => <li key={t.n} className="text-label2">{t.title}{t.status === "Open now" && <span className="ml-2 text-[12px] font-semibold text-accent">Open</span>}</li>)}
+            {TRACKS.map((t) => <li key={t.n} className="text-label2">{t.title}{t.status === "Practice open" && <span className="ml-2 text-[12px] font-semibold text-accent">Open</span>}</li>)}
           </FooterCol>
           <FooterCol title="Languages">
-            <li className="text-label2">Java<span className="ml-2 text-[12px] font-semibold text-accent">Open</span></li>
-            <li className="text-label2">Python <span className="text-label3">· soon</span></li>
-            <li className="text-label2">JavaScript <span className="text-label3">· soon</span></li>
+            {["Java", "Python", "JavaScript", "C++"].map((l) => <li key={l} className="text-label2">{l}</li>)}
           </FooterCol>
         </div>
         <div className="border-t border-sep">

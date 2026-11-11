@@ -20,7 +20,7 @@ mkdir -p /opt/codeway/tmp
 chown -R codeway:codeway /opt/codeway
 
 echo "==> Sandbox image for learner code"
-docker pull -q eclipse-temurin:21-jdk >/dev/null
+bash "$KIT/sandbox/ensure.sh"
 
 echo "==> Config and systemd unit"
 if [ ! -f /opt/codeway/codeway.env ]; then

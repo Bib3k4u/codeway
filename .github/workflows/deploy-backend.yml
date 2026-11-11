@@ -13,6 +13,7 @@ on:
     paths:
       - "backend/**"
       - "deploy/ec2/codeway.service"
+      - "deploy/ec2/sandbox/**"
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
@@ -32,7 +33,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -75,12 +76,16 @@ jobs:
           JAR=$(ls backend/target/codeway-backend-*.jar | head -1)
           scp -i ~/.ssh/deploy_key -q "$JAR" ec2-user@"$HOST":/tmp/codeway-backend.jar
           scp -i ~/.ssh/deploy_key -q deploy/ec2/codeway.service ec2-user@"$HOST":/tmp/codeway.service
+          $SSH ec2-user@"$HOST" "rm -rf /tmp/codeway-sandbox"
+          scp -i ~/.ssh/deploy_key -q -r deploy/ec2/sandbox ec2-user@"$HOST":/tmp/codeway-sandbox
           $SSH ec2-user@"$HOST" 'sudo bash -s' <<'REMOTE'
           set -euo pipefail
           [ -f /opt/codeway/codeway.env ] || { echo "Server not set up yet: run ./deploy/ec2/launch.sh once"; exit 1; }
           if ! cmp -s /tmp/codeway.service /etc/systemd/system/codeway.service; then
             install -m 644 /tmp/codeway.service /etc/systemd/system/codeway.service && systemctl daemon-reload
           fi
+          bash /tmp/codeway-sandbox/ensure.sh   # builds the multi-language sandbox image when its tag is new
+          rm -rf /tmp/codeway-sandbox
           install -o codeway -g codeway -m 644 /tmp/codeway-backend.jar /opt/codeway/codeway-backend.jar
           rm -f /tmp/codeway-backend.jar /tmp/codeway.service
           systemctl restart codeway

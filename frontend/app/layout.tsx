@@ -9,8 +9,8 @@ const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", displa
 const barlow = Barlow_Condensed({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-barlow", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Codeway: learn OOP by building",
-  description: "An adaptive coding tutor that teaches object-oriented programming through real Java challenges.",
+  title: "Codeway: OOP to system design, by building",
+  description: "An adaptive AI coding tutor: object-oriented programming, SOLID, design patterns and low-level design, practised in Java, Python, JavaScript and C++.",
   icons: {
     // favicon follows the system theme: black "C" on light tab bars, white "C" on dark ones
     icon: [

@@ -3,14 +3,15 @@ import { supabase } from "./supabase";
 export type Files = Record<string, string>;
 
 export interface User { id: number; email: string; displayName: string; preferredLanguage?: string; avatarUrl?: string }
+export interface Track { id: string; order: number; title: string; summary: string; practice: boolean }
 export interface ConceptRow {
-  id: string; title: string; summary: string; symbol: string;
+  id: string; title: string; summary: string; symbol: string; track: string; group?: string;
   available: boolean; inProgress: boolean; practice?: boolean; progress: number; score: number; streak: number; mastered: boolean; attempts: number;
 }
-export interface Lesson { title: string; contentMd: string; source: string }
+export interface Lesson { title: string; contentMd: string; source: string; track?: string; practice?: boolean }
 export interface MasteryView { score: number; streak: number; mastered: boolean; streakGoal: number; attempts: number }
 export interface Challenge {
-  id: number; title: string; descriptionMd: string; difficulty: number;
+  id: number; title: string; descriptionMd: string; difficulty: number; language?: string;
   scaffolding: "HEAVY" | "PARTIAL" | "BLANK"; expectedMinutes: number; files: Files;
   testNames: string[]; sampleOutput: string;
 }

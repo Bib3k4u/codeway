@@ -5,8 +5,16 @@ const KEYWORDS = new Set([
   "new", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "this", "super", "throw", "throws",
   "try", "catch", "finally", "import", "package", "instanceof", "null", "true", "false", "void",
   "def", "self", "None", "True", "False", "lambda", "pass", "function", "const", "let", "var", "async", "await", "export", "default",
+  // Python
+  "from", "in", "not", "and", "or", "is", "with", "as", "raise", "except", "elif", "yield", "assert", "global", "nonlocal",
+  // JavaScript
+  "of", "typeof", "undefined", "get", "set", "static",
+  // C++
+  "namespace", "template", "typename", "using", "virtual", "override", "struct", "auto", "nullptr", "delete", "operator",
+  "inline", "constexpr", "explicit", "friend", "noexcept", "unsigned", "const_cast", "static_cast", "dynamic_cast",
 ]);
-const PRIMITIVES = new Set(["int", "double", "float", "long", "boolean", "char", "byte", "short", "String", "Object", "List", "Map", "Set", "str", "bool", "number", "string"]);
+const PRIMITIVES = new Set(["int", "double", "float", "long", "boolean", "char", "byte", "short", "String", "Object", "List", "Map", "Set", "str", "bool", "number", "string",
+  "dict", "list", "tuple", "size_t", "vector", "map", "unique_ptr", "shared_ptr", "std"]);
 const TOKEN = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\b\d+(?:\.\d+)?\b|[A-Za-z_$][\w$]*|@[A-Za-z_]\w*|\s+|.)/g;
 
 /**

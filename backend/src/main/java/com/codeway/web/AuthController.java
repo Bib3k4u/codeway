@@ -39,6 +39,7 @@ public class AuthController {
             Map<String, Integer> counts = visits(u);
             counts.merge(b.language(), 1, Integer::sum);
             u.languageVisitsJson = com.codeway.service.Json.write(counts);
+            u.preferredLanguage = b.language();
             users.save(u);
         }
         return Map.of("preferredLanguage", preferred(u));
@@ -51,7 +52,8 @@ public class AuthController {
         } catch (Exception e) { return new java.util.HashMap<>(); }
     }
 
+    /** The language this learner last chose; Java until they pick another one. */
     private static String preferred(User u) {
-        return visits(u).entrySet().stream().max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse("java");
+        return u.preferredLanguage != null && com.codeway.service.ConceptCatalog.LANGUAGES.contains(u.preferredLanguage) ? u.preferredLanguage : "java";
     }
 }

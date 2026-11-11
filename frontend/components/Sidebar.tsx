@@ -7,6 +7,7 @@ import FloatingTip, { type Tip } from "./FloatingTip";
 import { Check, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { api, type ConceptRow } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { byTrack, useTracks } from "@/lib/tracks";
 import { conceptGlyph } from "./ConceptIcon";
 
 /** Brand "C" emblem (no speed lines), swapped for light/dark themes. */
@@ -29,6 +30,8 @@ export function Logo({ height = 30 }: { height?: number }) {
   );
 }
 
+const SHORT: Record<string, string> = { oop: "OOP", solid: "SOLID", patterns: "Design patterns", lld: "Low-level design" };
+
 export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed: boolean; onToggle?: () => void; onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -41,7 +44,10 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
     const r = el.getBoundingClientRect();
     setTip({ place: "right", x: r.right, leftX: r.left, y: r.top + r.height / 2, text: el.dataset.tip });
   };
-  useEffect(() => { api<ConceptRow[]>("/mastery?language=java").then(setConcepts).catch(() => {}); }, [pathname]);
+  const language = user?.preferredLanguage ?? "java";
+  const tracks = useTracks();
+  useEffect(() => { api<ConceptRow[]>(`/mastery?language=${language}`).then(setConcepts).catch(() => {}); }, [pathname, language]);
+  const groups = byTrack(tracks, concepts).filter((g) => g.rows.length);
 
   const tip = (t: string) => (collapsed ? { "data-tip": t } : {});
   const initial = (user?.displayName ?? "?").slice(0, 1).toUpperCase();
@@ -59,26 +65,32 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
           <LayoutGrid size={17} className="navicon" />{!collapsed && "Dashboard"}
         </Link>
 
-        {collapsed ? <div className="mx-auto my-3 h-px w-8 bg-sep" /> : <p className="navgroup">Java</p>}
-        <div className={collapsed ? "space-y-1" : "space-y-0.5"}>
-          {concepts.map((c) => {
-            const Icon = conceptGlyph(c.symbol);
-            const active = pathname.startsWith(`/learn/${c.id}`);
-            const status = c.mastered ? "mastered" : c.inProgress ? "in progress" : c.available ? "" : "needs AI setup";
-            const body = (
-              <>
-                <Icon size={17} className="navicon" />
-                {!collapsed && <span className="min-w-0 flex-1 truncate">{c.title}</span>}
-                {c.mastered ? <Check size={14} className={`shrink-0 text-ok ${collapsed ? "absolute right-1 top-1 h-3 w-3" : ""}`} aria-hidden />
-                  : c.inProgress ? <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full bg-warn ${collapsed ? "absolute right-1.5 top-1.5" : ""}`} /> : null}
-              </>
-            );
-            const label = status ? `${c.title} (${status})` : c.title;
-            return c.available
-              ? <Link key={c.id} href={`/learn/${c.id}`} onClick={onNavigate} className="navitem" aria-current={active ? "page" : undefined} aria-label={label} {...tip(c.title)}>{body}</Link>
-              : <div key={c.id} className="navitem" aria-disabled="true" aria-label={label}>{body}</div>;
-          })}
-        </div>
+        {groups.map(({ track, rows }) => (
+          <div key={track.id}>
+            {collapsed ? <div className="mx-auto my-3 h-px w-8 bg-sep" /> : (
+              <p className="navgroup flex items-center gap-2">
+                <span className="tabular-nums text-label3">{track.order}</span>{SHORT[track.id] ?? track.title}
+                {!track.practice && <span className="chip !h-[18px] !px-1.5 !text-[10px]">Lessons</span>}
+              </p>
+            )}
+            <div className={collapsed ? "space-y-1" : "space-y-0.5"}>
+              {rows.map((c) => {
+                const Icon = conceptGlyph(c.symbol);
+                const active = pathname.startsWith(`/learn/${c.id}`);
+                const status = c.mastered ? "mastered" : c.inProgress ? "in progress" : "";
+                const label = status ? `${c.title} (${status})` : c.title;
+                return (
+                  <Link key={c.id} href={`/learn/${c.id}`} onClick={onNavigate} className="navitem" aria-current={active ? "page" : undefined} aria-label={label} {...tip(`${track.title}: ${c.title}`)}>
+                    <Icon size={17} className="navicon" />
+                    {!collapsed && <span className="min-w-0 flex-1 truncate">{c.title}</span>}
+                    {c.mastered ? <Check size={14} className={`shrink-0 text-ok ${collapsed ? "absolute right-1 top-1 h-3 w-3" : ""}`} aria-hidden />
+                      : c.inProgress ? <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full bg-warn ${collapsed ? "absolute right-1.5 top-1.5" : ""}`} /> : null}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
 
       </div>
 

@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, CheckCircle2, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
+import { ArrowRight, BookOpen, CheckCircle2, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import ConceptIcon from "@/components/ConceptIcon";
 import Heatmap from "@/components/Heatmap";
-import { api, type ConceptRow } from "@/lib/api";
+import { api, type ConceptRow, type Track } from "@/lib/api";
+import { LANGS, langLabel, type LangId } from "@/lib/lang";
+import { byTrack, useTracks } from "@/lib/tracks";
 import { useAuth } from "@/lib/auth";
 import { useStats } from "@/lib/stats";
 
@@ -42,20 +44,24 @@ const ago = (iso: string) => {
 };
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, setLanguage } = useAuth();
   const { stats, error: statsError, refresh } = useStats();
-  const [rows, setRows] = useState<ConceptRow[] | null>(null);
+  const [loaded, setLoaded] = useState<{ language: string; rows: ConceptRow[] } | null>(null);
   const [error, setError] = useState("");
+  const tracks = useTracks();
+  const language = (user?.preferredLanguage ?? "java") as LangId;
+  // rows belong to one language; after a switch the old ones are hidden until the new ones arrive
+  const rows = loaded?.language === language ? loaded.rows : null;
 
   useEffect(() => {
     if (!user) return;
-    api<ConceptRow[]>("/mastery?language=java").then(setRows).catch((e) => setError(e.message));
-    refresh();
-  }, [user, refresh]);
+    api<ConceptRow[]>(`/mastery?language=${language}`).then((r) => setLoaded({ language, rows: r })).catch((e) => setError(e.message));
+  }, [user, language]);
 
-  const next = rows?.find((r) => r.inProgress && !r.mastered)
-    ?? rows?.filter((r) => r.available && !r.mastered && r.attempts > 0).sort((a, b) => b.score - a.score)[0]
-    ?? rows?.find((r) => r.available && !r.mastered);
+  const practiceRows = rows?.filter((r) => r.practice);
+  const next = practiceRows?.find((r) => r.inProgress && !r.mastered)
+    ?? practiceRows?.filter((r) => r.available && !r.mastered && r.attempts > 0).sort((a, b) => b.score - a.score)[0]
+    ?? practiceRows?.find((r) => r.available && !r.mastered);
   const first = user?.displayName.split(" ")[0] ?? "";
   const since = stats?.joinedAt ? new Date(stats.joinedAt).toLocaleDateString(undefined, { month: "long", year: "numeric" }) : null;
   const hours = stats ? Math.floor(stats.minutesCoding / 60) : 0;
@@ -65,18 +71,28 @@ export default function Dashboard() {
       {/* profile header */}
       <header className="glow rise mb-8 flex flex-wrap items-center justify-between gap-5">
         <div className="flex items-center gap-4">
-          <span aria-hidden className="display grid h-16 w-16 place-items-center rounded-full text-[30px]" style={{ background: "var(--accent-fill)", color: "var(--accent-ink)" }}>{first.slice(0, 1).toUpperCase()}</span>
+          {user?.avatarUrl
+            // eslint-disable-next-line @next/next/no-img-element -- GitHub avatar; no need for the image optimizer
+            ? <img src={user.avatarUrl} alt="" width={64} height={64} referrerPolicy="no-referrer" className="h-16 w-16 rounded-full object-cover ring-2 ring-[var(--accent-fill)] ring-offset-2 ring-offset-[var(--bg)]" />
+            : <span aria-hidden className="display grid h-16 w-16 place-items-center rounded-full text-[30px]" style={{ background: "var(--accent-fill)", color: "var(--accent-ink)" }}>{first.slice(0, 1).toUpperCase()}</span>}
           <div>
             <p className="eyebrow mb-1.5">Welcome back</p>
             <h1 className="display text-[44px] sm:text-[52px]">{first}</h1>
-            <p className="mt-1.5 text-[14px] text-label2">Java track{since ? ` · Learning since ${since}` : ""}</p>
+            <p className="mt-1.5 text-[14px] text-label2">Coding in {langLabel(language)}{since ? ` · Learning since ${since}` : ""}</p>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+        <div className="seg" role="tablist" aria-label="Practice language">
+          {LANGS.map((l) => (
+            <button key={l.id} role="tab" aria-selected={l.id === language} onClick={() => l.id !== language && setLanguage(l.id)}>{l.label}</button>
+          ))}
+        </div>
         {next && (
-          <Link href={`/learn/${next.id}${next.inProgress ? "/practice" : ""}`} className="btn btn-primary btn-lg">
+          <Link href={`/learn/${next.id}${next.inProgress ? `/practice?lang=${language}` : ""}`} className="btn btn-primary btn-lg">
             {next.inProgress ? `Continue ${next.title}` : `Start ${next.title}`}<ArrowRight size={17} />
           </Link>
         )}
+        </div>
       </header>
 
       {error && <p role="alert" className="mb-6 rounded-lg bg-badsoft px-4 py-3 text-sm text-bad">{error}</p>}
@@ -101,39 +117,10 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* activity calendar */}
-      <Section title="Activity" meta={stats ? `${stats.yearTotal} activities · ${stats.activeDays} active days in the last year` : undefined}>
-        <div className="card p-5">{stats ? <Heatmap days={stats.days} today={stats.today} /> : <div className="skeleton h-[130px]" />}</div>
-      </Section>
-
       <div className="grid gap-x-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <Section title="Concepts" meta={rows ? `${rows.filter((r) => r.mastered).length} of ${rows.length} mastered` : undefined}>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {(rows ?? Array.from({ length: 6 })).map((r, i) => {
-              if (!r) return <div key={i} className="skeleton h-[172px]" />;
-              const c = r as ConceptRow;
-              const body = (
-                <div className={`card rise flex h-full flex-col p-5 transition-[transform,border-color] duration-200 ${c.available ? "hover:-translate-y-0.5 hover:border-[var(--accent)]" : "opacity-55"}`} style={{ animationDelay: `${i * 35}ms` }}>
-                  <div className="mb-4 flex items-center justify-between">
-                    <ConceptIcon symbol={c.symbol} size={36} />
-                    {c.mastered ? <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>
-                      : c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
-                      : c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Streak {c.streak}/3</span>
-                      : !c.available ? <span className="chip">Needs AI setup</span> : null}
-                  </div>
-                  <h3 className="display text-[24px]">{c.title}</h3>
-                  <p className="mt-1.5 flex-1 text-[13.5px] leading-snug text-label2">{c.summary}</p>
-                  <div className="mt-4 flex items-center gap-3">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fill" role="progressbar" aria-valuenow={Math.round(c.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`${c.title} mastery`}>
-                      <div className="h-full rounded-full transition-[width] duration-1000" style={{ width: `${c.progress * 100}%`, background: c.mastered ? "var(--green)" : "var(--accent-fill)" }} />
-                    </div>
-                    <span className="text-xs tabular-nums text-label2">{c.attempts > 0 ? `${Math.round(c.progress * 100)}%` : "Not started"}</span>
-                  </div>
-                </div>
-              );
-              return c.available ? <Link key={c.id} href={`/learn/${c.id}`}>{body}</Link> : <div key={c.id} aria-disabled>{body}</div>;
-            })}
-          </div>
+        {/* activity calendar */}
+        <Section title="Activity" meta={stats ? `${stats.yearTotal} activities · ${stats.activeDays} active days in the last year` : undefined}>
+          <div className="card p-5">{stats ? <Heatmap days={stats.days} today={stats.today} /> : <div className="skeleton h-[130px]" />}</div>
         </Section>
 
         <Section title="Recent submissions">
@@ -156,6 +143,76 @@ export default function Dashboard() {
           </div>
         </Section>
       </div>
+
+      <Section title="Your learning path" meta="Learn in this order: each track builds on the one before">
+        {!rows || !tracks.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-[172px]" />)}</div> : (
+          <ol className="relative">
+            {byTrack(tracks, rows).map(({ track, rows: list }, ti, all) => (
+              <TrackStep key={track.id} track={track} rows={list} last={ti === all.length - 1} />
+            ))}
+          </ol>
+        )}
+      </Section>
+
     </AppShell>
+  );
+}
+
+/** One track on the learning path: a numbered marker on a connecting line, then its concept cards. */
+function TrackStep({ track, rows, last }: { track: Track; rows: ConceptRow[]; last: boolean }) {
+  const mastered = rows.filter((r) => r.mastered).length;
+  const groups = [...new Set(rows.map((r) => r.group ?? ""))];
+  return (
+    <li className="relative grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 pb-10 last:pb-0 sm:gap-x-5">
+      {!last && <span aria-hidden className="absolute bottom-0 left-[19px] top-11 w-px bg-sep" />}
+      <span aria-hidden className={`display z-[1] grid h-10 w-10 place-items-center rounded-full text-[19px] ${track.practice ? "" : "border border-sep bg-card text-label2"}`}
+        style={track.practice ? { background: "var(--accent-fill)", color: "var(--accent-ink)" } : undefined}>{track.order}</span>
+      <div className="min-w-0">
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pt-1.5">
+          <div className="min-w-0">
+            <h3 className="text-[19px] font-semibold tracking-tight">{track.title}</h3>
+            <p className="mt-0.5 text-[13.5px] text-label2">{track.summary}</p>
+          </div>
+          {track.practice
+            ? <span className="chip chip-accent">{mastered} of {rows.length} mastered</span>
+            : <span className="chip"><BookOpen size={12} />Lessons · practice coming soon</span>}
+        </div>
+        {groups.map((g) => (
+          <div key={g || "all"} className="mb-4 last:mb-0">
+            {g && <p className="eyebrow mb-2">{g}</p>}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {rows.filter((r) => (r.group ?? "") === g).map((c, i) => <ConceptCard key={c.id} c={c} i={i} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </li>
+  );
+}
+
+function ConceptCard({ c, i }: { c: ConceptRow; i: number }) {
+  return (
+    <Link href={`/learn/${c.id}`} className="block">
+      <div className="card rise flex h-full flex-col p-5 transition-[transform,border-color] duration-200 hover:-translate-y-0.5 hover:border-[var(--accent)]" style={{ animationDelay: `${i * 35}ms` }}>
+        <div className="mb-4 flex items-center justify-between">
+          <ConceptIcon symbol={c.symbol} size={36} />
+          {!c.practice ? <span className="chip">Lesson</span>
+            : c.mastered ? <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>
+            : c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
+            : c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Streak {c.streak}/3</span>
+            : null}
+        </div>
+        <h4 className="display text-[22px]">{c.title}</h4>
+        <p className="mt-1.5 flex-1 text-[13.5px] leading-snug text-label2">{c.summary}</p>
+        {c.practice && (
+          <div className="mt-4 flex items-center gap-3">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fill" role="progressbar" aria-valuenow={Math.round(c.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`${c.title} mastery`}>
+              <div className="h-full rounded-full transition-[width] duration-1000" style={{ width: `${c.progress * 100}%`, background: c.mastered ? "var(--green)" : "var(--accent-fill)" }} />
+            </div>
+            <span className="text-xs tabular-nums text-label2">{c.attempts > 0 ? `${Math.round(c.progress * 100)}%` : "Not started"}</span>
+          </div>
+        )}
+      </div>
+    </Link>
   );
 }

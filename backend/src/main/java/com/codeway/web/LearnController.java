@@ -48,11 +48,13 @@ public class LearnController {
         for (var c : catalog.list(language)) {
             ConceptMastery m = byConcept.getOrDefault(c.id(), mastery.get(uid(req), language, c.id()));
             Map<String, Object> row = new LinkedHashMap<>();
+            boolean practice = catalog.practiceOpen(language, c.id());
             row.put("id", c.id()); row.put("title", c.title()); row.put("summary", c.summary()); row.put("symbol", c.symbol());
-            row.put("available", challenges.hasContent(language, c.id()));
+            row.put("track", c.track()); if (c.group() != null) row.put("group", c.group());
+            row.put("available", practice && challenges.hasContent(language, c.id()));
             row.put("score", AttemptService.round(m.score)); row.put("streak", m.streak);
             row.put("progress", m.attemptsCount > 0 ? AttemptService.round(m.score) : 0.0);
-            row.put("practice", ConceptCatalog.PRACTICE.contains(language));
+            row.put("practice", practice);
             row.put("mastered", m.mastered); row.put("attempts", m.attemptsCount);
             row.put("inProgress", open.contains(c.id()));
             out.add(row);
@@ -60,11 +62,16 @@ public class LearnController {
         return out;
     }
 
+    /** The learning path, in order. */
+    @GetMapping("/tracks")
+    public List<ConceptCatalog.Track> tracks() { return catalog.tracks(); }
+
     @GetMapping("/lessons")
     public Map<String, Object> lesson(@RequestParam(defaultValue = "java") String language, @RequestParam String concept) {
         Lesson l = lessons.get(language, concept);
         var c = catalog.find(language, concept).orElseThrow();
-        return Map.of("language", language, "concept", concept, "title", c.title(), "contentMd", l.contentMd, "source", l.source);
+        return Map.of("language", language, "concept", concept, "title", c.title(), "contentMd", l.contentMd, "source", l.source,
+                "track", c.track(), "practice", catalog.practiceOpen(language, concept));
     }
 
     @PostMapping("/challenges/next")

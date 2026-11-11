@@ -18,6 +18,7 @@ public class Challenge {
     @Column(columnDefinition = "text") public String referenceSolutionJson;
     @Column(columnDefinition = "text") public String hintsJson;          // optional stored hints [l1,l2,l3]
     @Column(columnDefinition = "text") public String sampleOutput;       // stdout of the reference Main
+    @Column(columnDefinition = "text") public String testNamesJson;      // ["name", ...] as the reference run reported them
     public boolean validated = false;
     public String origin;           // seed | ai
     public Instant createdAt = Instant.now();

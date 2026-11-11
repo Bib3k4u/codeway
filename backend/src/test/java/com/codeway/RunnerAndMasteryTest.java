@@ -8,7 +8,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerAndMasteryTest {
-    private final LocalJavaRunner runner = new LocalJavaRunner();
+    private final LocalRunner runner = new LocalRunner();
 
     private static final String TESTS = """
             public class TestMain { public static void main(String[] a) {

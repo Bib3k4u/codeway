@@ -15,6 +15,7 @@ JAR="$(ls "$ROOT"/backend/target/codeway-backend-*.jar | head -1)"
 echo "==> Uploading"
 "${SSH[@]}" "$HOST" 'mkdir -p /tmp/codeway-deploy'
 "${SCP[@]}" -q "$ROOT"/deploy/ec2/{setup.sh,codeway.service,codeway.env.example} "$HOST":/tmp/codeway-deploy/
+"${SCP[@]}" -q -r "$ROOT"/deploy/ec2/sandbox "$HOST":/tmp/codeway-deploy/
 "${SCP[@]}" -q "$JAR" "$HOST":/tmp/codeway-deploy/codeway-backend.jar
 if [ -f "$ROOT/deploy/ec2/codeway.env" ]; then
   echo "    (also uploading deploy/ec2/codeway.env)"

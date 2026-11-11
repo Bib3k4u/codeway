@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Check, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, X, XCircle, Trophy, Terminal } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -10,7 +10,8 @@ import Ring from "@/components/Ring";
 import Splitter from "@/components/Splitter";
 import Confetti from "@/components/Confetti";
 import { useStats } from "@/lib/stats";
-import { recordVisit } from "@/lib/lang";
+import { isLang, langInfo, type LangId } from "@/lib/lang";
+import { useAuth } from "@/lib/auth";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
@@ -19,9 +20,21 @@ import { api, saveDraftOnExit, type Files, type Hint, type RunResp, type StartRe
 type Busy = null | "main" | "tests" | "submit" | "hint";
 const hintNames = ["Nudge", "Concept", "Partial code", "Solution"];
 
+/** Picks the language: ?lang= in the URL, else the one this learner last chose, else Java. */
 export default function Practice() {
   const { concept } = useParams<{ concept: string }>();
+  const search = useSearchParams();
+  const { user, loading } = useAuth();
+  const q = search.get("lang");
+  const lang: LangId | null = isLang(q) ? q : loading ? null : isLang(user?.preferredLanguage) ? user.preferredLanguage : "java";
+  if (!lang) return <AppShell><div className="skeleton mx-auto mt-10 h-8 w-64" /></AppShell>;
+  // A fresh workspace per language: switching languages starts (or resumes) that language's challenge.
+  return <Workspace key={lang} concept={concept} lang={lang} />;
+}
+
+function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
   const router = useRouter();
+  const { setLanguage } = useAuth();
   const [start, setStart] = useState<StartResp | null>(null);
   const [error, setError] = useState("");
   const [files, setFiles] = useState<Files>({});
@@ -134,8 +147,7 @@ export default function Practice() {
   useEffect(() => {
     if (started.current === startKey) return;
     started.current = startKey;
-    recordVisit("java");
-    api<StartResp>("/challenges/next", { language: "java", concept })
+    api<StartResp>("/challenges/next", { language: lang, concept })
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
         saved.current = initial;
@@ -149,7 +161,7 @@ export default function Practice() {
         t0.current = performance.now(); sentFirst.current = r.resumed;
       })
       .catch((e) => setError(e.message));
-  }, [concept, startKey]);
+  }, [concept, startKey, lang]);
 
   function onEdit(path: string, value: string) {
     if (!attemptId || value === files[path]) return;
@@ -230,10 +242,18 @@ export default function Practice() {
   function addFile() {
     let n = (newName ?? "").trim();
     if (!n) { setNewName(null); return; }
-    if (!n.endsWith(".java")) n += ".java";
-    if (!/^[A-Za-z0-9_]+\.java$/.test(n) || files[n] !== undefined) { setNewName(null); return; }
-    const cls = n.replace(".java", "");
-    setFiles((f) => ({ ...f, [n]: `public class ${cls} {\n    \n}\n` })); openFile(n); setNewName(null);
+    const info = langInfo(lang);
+    if (!/\.[a-z]+$/.test(n)) n += info.ext;
+    if (!info.file.test(n) || files[n] !== undefined) { setNewName(null); return; }
+    setFiles((f) => ({ ...f, [n]: info.template(n.replace(/\.[a-z]+$/, "")) })); openFile(n); setNewName(null);
+  }
+
+  /** Saves this language's draft, then opens the same concept in another language. */
+  function switchLang(l: LangId) {
+    if (l === lang) return;
+    if (attemptId && Object.keys(files).length) saveDraftOnExit(attemptId, files);
+    setLanguage(l);
+    router.replace(`/learn/${concept}/practice?lang=${l}`);
   }
 
   const endParty = useCallback(() => setParty(false), []);
@@ -272,7 +292,7 @@ export default function Practice() {
   const crumb = (
     <div className="hidden items-center gap-2 text-sm text-label2 md:flex">
       <ChevronLeft size={14} />
-      <Link href={`/learn/${concept}`} className="navlink hover:text-label">Lesson</Link>
+      <Link href={`/learn/${concept}?lang=${lang}`} className="navlink hover:text-label">Lesson</Link>
       <span className="text-label3">/</span>
       <span className="font-medium text-label">{ch.title}</span>
       <span className="chip">Level {ch.difficulty}</span>
@@ -361,7 +381,7 @@ export default function Practice() {
                 aria-label={showDesc ? "Hide brief" : "Show brief"} aria-pressed={showDesc} title={`${showDesc ? "Hide" : "Show"} brief (⌘B)`}>
                 <PanelLeft size={16} />
               </button>
-              <LangMenu value="java" />
+              <LangMenu value={lang} onChange={switchLang} />
               <span aria-hidden className="mx-1 h-5 w-px bg-sep" />
               <div className="flex min-w-0 flex-1 self-stretch overflow-x-auto" role="tablist" aria-label="Open files">
                 {open.map((n) => (
@@ -404,7 +424,7 @@ export default function Practice() {
                   {newName !== null && (
                     <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onBlur={addFile}
                       onKeyDown={(e) => { if (e.key === "Enter") addFile(); if (e.key === "Escape") setNewName(null); }}
-                      placeholder="Name.java" className="w-full rounded-lg bg-fill px-2 py-1.5 text-[13px] outline-none ring-2 ring-accent/40" />
+                      placeholder={langInfo(lang).placeholder} className="w-full rounded-lg bg-fill px-2 py-1.5 text-[13px] outline-none ring-2 ring-accent/40" />
                   )}
                 </div>
               </nav>
@@ -510,7 +530,7 @@ export default function Practice() {
 
       {/* ---------- Result sheet ---------- */}
       {party && <Confetti running={sheet === "result"} onDone={endParty} />}
-      {sheet === "result" && result && <ResultSheet r={result} concept={concept} onNext={nextChallenge} onHome={() => router.push("/dashboard")} />}
+      {sheet === "result" && result && <ResultSheet r={result} concept={concept} lang={lang} onNext={nextChallenge} onHome={() => router.push("/dashboard")} />}
     </AppShell>
   );
 }
@@ -674,7 +694,7 @@ function FixSheet({ r, busy, onFix, onMoveOn }: { r: SubmitResp; busy: boolean; 
   );
 }
 
-function ResultSheet({ r, concept, onNext, onHome }: { r: SubmitResp; concept: string; onNext: () => void; onHome: () => void }) {
+function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; concept: string; lang: LangId; onNext: () => void; onHome: () => void }) {
   const [shown, setShown] = useState(r.scoreBefore);
   useEffect(() => { const t = setTimeout(() => setShown(r.scoreAfter), 350); return () => clearTimeout(t); }, [r.scoreAfter]);
   const up = r.delta >= 0;
@@ -705,7 +725,7 @@ function ResultSheet({ r, concept, onNext, onHome }: { r: SubmitResp; concept: s
         <div className="flex gap-3">
           <button className="btn btn-secondary btn-lg flex-1" onClick={onHome}>Dashboard</button>
           {r.mastered
-            ? <Link href={`/learn/${concept}`} className="btn btn-primary btn-lg flex-1">Review lesson</Link>
+            ? <Link href={`/learn/${concept}?lang=${lang}`} className="btn btn-primary btn-lg flex-1">Review lesson</Link>
             : <button className="btn btn-primary btn-lg flex-1" onClick={onNext}>Next challenge<ArrowRight size={18} /></button>}
         </div>
       </div>

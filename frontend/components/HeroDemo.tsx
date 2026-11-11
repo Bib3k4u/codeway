@@ -3,39 +3,59 @@ import { useEffect, useState } from "react";
 import { Bot, CheckCircle2, Circle, Code2, Sparkles, Terminal } from "lucide-react";
 import { highlight } from "@/lib/highlight";
 
-const CODE = `public class Square extends Rectangle {
+/** The same exercise in each language Codeway teaches; the demo shows one per loop. */
+const VARIANTS = [
+  { file: "Square.java", lang: "java", code: `public class Square extends Rectangle {
 
     public Square(double side) {
         super(side, side);
     }
-}`;
+}` },
+  { file: "square.py", lang: "python", code: `class Square(Rectangle):
+
+    def __init__(self, side: float):
+        super().__init__(side, side)` },
+  { file: "square.js", lang: "javascript", code: `class Square extends Rectangle {
+
+  constructor(side) {
+    super(side, side);
+  }
+}` },
+  { file: "square.hpp", lang: "cpp", code: `class Square : public Rectangle {
+public:
+    explicit Square(double side)
+        : Rectangle(side, side) {}
+};` },
+];
 const TESTS = ["Rectangle computes width x height", "Square is a Rectangle with equal sides", "describe() uses each shape's own area()", "totalArea adds up different shapes"];
 const HINT = "Clean pass, no hints. Writing you a harder one: this time you design the classes.";
 
-type Phase = { typed: number; tests: number; hint: number; next: boolean };
-const DONE: Phase = { typed: CODE.length, tests: TESTS.length, hint: HINT.length, next: true };
+type Phase = { v: number; typed: number; tests: number; hint: number; next: boolean };
+const DONE: Phase = { v: 0, typed: VARIANTS[0].code.length, tests: TESTS.length, hint: HINT.length, next: true };
 
 /** Animated hero scene: code types itself, tests go green, the tutor reacts, the next challenge arrives. Loops. */
 export default function HeroDemo() {
-  const [p, setP] = useState<Phase>({ typed: 0, tests: 0, hint: 0, next: false });
+  const [p, setP] = useState<Phase>({ v: 0, typed: 0, tests: 0, hint: 0, next: false });
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { const t = setTimeout(() => setP(DONE), 0); return () => clearTimeout(t); }
     let timer: ReturnType<typeof setTimeout>;
     const step = (s: Phase) => {
       let next: Phase, wait: number;
-      if (s.typed < CODE.length) { next = { ...s, typed: s.typed + 1 }; wait = CODE[s.typed] === "\n" ? 140 : 26; }
+      const code = VARIANTS[s.v].code;
+      if (s.typed < code.length) { next = { ...s, typed: s.typed + 1 }; wait = code[s.typed] === "\n" ? 140 : 26; }
       else if (s.tests < TESTS.length) { next = { ...s, tests: s.tests + 1 }; wait = s.tests === 0 ? 650 : 420; }
       else if (s.hint < HINT.length) { next = { ...s, hint: s.hint + 2 }; wait = s.hint === 0 ? 600 : 22; }
       else if (!s.next) { next = { ...s, next: true }; wait = 500; }
-      else { next = { typed: 0, tests: 0, hint: 0, next: false }; wait = 4200; }
+      else { next = { v: (s.v + 1) % VARIANTS.length, typed: 0, tests: 0, hint: 0, next: false }; wait = 4200; }
       timer = setTimeout(() => { setP(next); step(next); }, wait);
     };
-    timer = setTimeout(() => step({ typed: 0, tests: 0, hint: 0, next: false }), 600);
+    timer = setTimeout(() => step({ v: 0, typed: 0, tests: 0, hint: 0, next: false }), 600);
     return () => clearTimeout(timer);
   }, []);
 
-  const typing = p.typed < CODE.length;
+  const variant = VARIANTS[p.v];
+  const typing = p.typed < variant.code.length;
   const passed = p.tests;
   const mastery = p.next ? 41 : 22;
 
@@ -45,11 +65,11 @@ export default function HeroDemo() {
       <div className="relative z-10 overflow-hidden rounded-[20px] border border-sep bg-card shadow-[var(--shadow-lg)]">
         <div className="flex h-10 items-center gap-2 border-b border-sep bg-card2 px-4">
           <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" /><span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" /><span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-          <span className="ml-3 flex items-center gap-1.5 text-[12px] font-semibold text-label2"><Code2 size={13} className="text-accent" />Square.java</span>
+          <span className="ml-3 flex items-center gap-1.5 text-[12px] font-semibold text-label2"><Code2 size={13} className="text-accent" />{variant.file}</span>
           <span className="chip ml-auto !h-6 !text-[11px]">Level 1 · Guided</span>
         </div>
         <pre className="min-h-[178px] px-5 py-4 font-mono text-[13.5px] leading-[1.7]">
-          <code>{highlight(CODE.slice(0, p.typed), "java")}</code>
+          <code>{highlight(variant.code.slice(0, p.typed), variant.lang)}</code>
           <span className={`ml-px inline-block h-[17px] w-[2px] translate-y-[3px] bg-[var(--accent-fill)] ${typing ? "" : "caret-blink"}`} />
         </pre>
         <div className="border-t border-sep bg-card2 px-5 py-3.5">

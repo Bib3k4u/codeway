@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, rememberToken, type User } from "./api";
 import { supabase } from "./supabase";
+import { recordVisit, type LangId } from "./lang";
 
 interface AuthCtx {
   user: User | null;
@@ -9,6 +10,8 @@ interface AuthCtx {
   /** Redirects to GitHub; the user comes back to /auth/callback, then `next` (default /dashboard). */
   signInWithGitHub: (next?: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** The learner picked another language: remember it (server and here) so every page follows. */
+  setLanguage: (language: LangId) => void;
 }
 const Ctx = createContext<AuthCtx | null>(null);
 
@@ -49,7 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase().auth.signOut().catch(() => {});
   }, []);
 
-  const value = useMemo(() => ({ user, loading, signInWithGitHub, signOut }), [user, loading, signInWithGitHub, signOut]);
+  const setLanguage = useCallback((language: LangId) => {
+    recordVisit(language);
+    setUser((u) => (u && u.preferredLanguage !== language ? { ...u, preferredLanguage: language } : u));
+  }, []);
+
+  const value = useMemo(() => ({ user, loading, signInWithGitHub, signOut, setLanguage }), [user, loading, signInWithGitHub, signOut, setLanguage]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
