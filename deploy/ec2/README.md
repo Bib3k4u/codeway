@@ -8,7 +8,7 @@ limits, 10 s time limit. This is set up for testing with a few people, not for p
 
 ```bash
 aws login                      # once; or aws configure with an access key
-./deploy/ec2/launch.sh         # creates key pair, security group (your IP only) and a t3.micro, then deploys
+./deploy/ec2/launch.sh         # creates key pair, security group (your IP only) and a t2.micro, then deploys
 ./deploy/ec2/smoke-test.sh http://$(./deploy/ec2/launch.sh ip):8080
 ```
 

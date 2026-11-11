@@ -10,10 +10,10 @@
 #   ./deploy/ec2/launch.sh destroy    terminate the server and delete its security group and key pair
 #
 # Settings (environment variables): AWS_REGION (default us-east-2, same region as the Neon database),
-# INSTANCE_TYPE (default t3.micro), AWS_PROFILE (optional).
+# INSTANCE_TYPE (default t2.micro: the free-tier type for this account), AWS_PROFILE (optional).
 set -euo pipefail
 export AWS_REGION="${AWS_REGION:-us-east-2}" AWS_PAGER=""
-TYPE="${INSTANCE_TYPE:-t3.micro}"
+TYPE="${INSTANCE_TYPE:-t2.micro}"
 NAME=codeway-backend SG_NAME=codeway-sg KEY_NAME=codeway
 KEY_FILE="$HOME/.ssh/codeway.pem"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
