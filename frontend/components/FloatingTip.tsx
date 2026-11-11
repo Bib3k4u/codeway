@@ -37,7 +37,7 @@ export default function FloatingTip({ tip }: { tip: Tip | null }) {
   if (!tip || typeof document === "undefined") return null;
   return createPortal(
     <div ref={ref} role="tooltip"
-      className="pointer-events-none fixed z-[200] whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold shadow-lg"
+      className="pointer-events-none fixed z-[210] whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold shadow-lg"
       style={{ left: 0, top: 0, visibility: "hidden", background: "var(--label)", color: "var(--bg)" }}>
       {tip.text}
     </div>,

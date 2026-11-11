@@ -86,7 +86,8 @@ export default function AppShell({ children, fluid = false, left, crumb, actions
         </div>
       )}
 
-      <div className="min-w-0 flex-1">
+      {/* overflow-x-clip: decorative glows bleed past the edge; clip (not hidden) keeps the sticky header working */}
+      <div className="min-w-0 flex-1 overflow-x-clip">
         <header className="glass sticky top-0 z-30">
           <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">

@@ -12,6 +12,7 @@ import Confetti from "@/components/Confetti";
 import { useStats } from "@/lib/stats";
 import { isLang, langInfo, type LangId } from "@/lib/lang";
 import { useAuth } from "@/lib/auth";
+import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
@@ -35,6 +36,7 @@ export default function Practice() {
 function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
   const router = useRouter();
   const { setLanguage } = useAuth();
+  const { refresh: refreshConcepts } = useConcepts();
   const [start, setStart] = useState<StartResp | null>(null);
   const [error, setError] = useState("");
   const [files, setFiles] = useState<Files>({});
@@ -193,7 +195,7 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
     try {
       await flush();
       const r = await api<SubmitResp>(`/attempts/${attemptId}/submit`, { files, confidence, finish });
-      setRun(r); refreshStats();
+      setRun(r); refreshStats(); refreshConcepts();
       if (!r.final) {                       // not every test passed: show why, let them fix and resubmit
         setRetry(r); setSheet("retry");
         if (!r.compiled) setBottom("console");

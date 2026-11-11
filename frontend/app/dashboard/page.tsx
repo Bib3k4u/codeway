@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, BookOpen, CheckCircle2, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
+import { useEffect, type ReactNode } from "react";
+import { ArrowRight, BookOpen, CheckCircle2, ChevronDown, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import ConceptIcon from "@/components/ConceptIcon";
 import Heatmap from "@/components/Heatmap";
-import { api, type ConceptRow, type Track } from "@/lib/api";
+import type { ConceptRow, Track } from "@/lib/api";
+import { useConcepts } from "@/lib/concepts";
+import { usePref } from "@/lib/prefs";
 import { LANGS, langLabel, type LangId } from "@/lib/lang";
 import { byTrack, useTracks } from "@/lib/tracks";
 import { useAuth } from "@/lib/auth";
@@ -46,17 +48,15 @@ const ago = (iso: string) => {
 export default function Dashboard() {
   const { user, setLanguage } = useAuth();
   const { stats, error: statsError, refresh } = useStats();
-  const [loaded, setLoaded] = useState<{ language: string; rows: ConceptRow[] } | null>(null);
-  const [error, setError] = useState("");
+  const { rows, refresh: refreshConcepts } = useConcepts();
   const tracks = useTracks();
   const language = (user?.preferredLanguage ?? "java") as LangId;
-  // rows belong to one language; after a switch the old ones are hidden until the new ones arrive
-  const rows = loaded?.language === language ? loaded.rows : null;
+  // Open tracks on the path (persisted). Nothing saved yet: the first track.
+  const [openPref, setOpenPref] = usePref("pathOpen", "oop");
+  const open = new Set(openPref.split(",").filter(Boolean));
+  const toggle = (id: string) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); setOpenPref([...n].join(",") || ","); };
 
-  useEffect(() => {
-    if (!user) return;
-    api<ConceptRow[]>(`/mastery?language=${language}`).then((r) => setLoaded({ language, rows: r })).catch((e) => setError(e.message));
-  }, [user, language]);
+  useEffect(() => { if (user) { refreshConcepts(); refresh(); } }, [user, refreshConcepts, refresh]);
 
   const practiceRows = rows?.filter((r) => r.practice);
   const next = practiceRows?.find((r) => r.inProgress && !r.mastered)
@@ -95,7 +95,6 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {error && <p role="alert" className="mb-6 rounded-lg bg-badsoft px-4 py-3 text-sm text-bad">{error}</p>}
 
       {statsError && !stats && (
         <div role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-badsoft px-5 py-4 text-sm text-bad">
@@ -117,7 +116,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div className="grid gap-x-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         {/* activity calendar */}
         <Section title="Activity" meta={stats ? `${stats.yearTotal} activities · ${stats.activeDays} active days in the last year` : undefined}>
           <div className="card p-5">{stats ? <Heatmap days={stats.days} today={stats.today} /> : <div className="skeleton h-[130px]" />}</div>
@@ -148,7 +147,7 @@ export default function Dashboard() {
         {!rows || !tracks.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-[172px]" />)}</div> : (
           <ol className="relative">
             {byTrack(tracks, rows).map(({ track, rows: list }, ti, all) => (
-              <TrackStep key={track.id} track={track} rows={list} last={ti === all.length - 1} />
+              <TrackStep key={track.id} track={track} rows={list} last={ti === all.length - 1} open={open.has(track.id)} onToggle={() => toggle(track.id)} />
             ))}
           </ol>
         )}
@@ -159,32 +158,36 @@ export default function Dashboard() {
 }
 
 /** One track on the learning path: a numbered marker on a connecting line, then its concept cards. */
-function TrackStep({ track, rows, last }: { track: Track; rows: ConceptRow[]; last: boolean }) {
+function TrackStep({ track, rows, last, open, onToggle }: { track: Track; rows: ConceptRow[]; last: boolean; open: boolean; onToggle: () => void }) {
   const mastered = rows.filter((r) => r.mastered).length;
   const groups = [...new Set(rows.map((r) => r.group ?? ""))];
   return (
-    <li className="relative grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 pb-10 last:pb-0 sm:gap-x-5">
+    <li className={`relative grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 last:pb-0 sm:gap-x-5 ${open ? "pb-10" : "pb-5"}`}>
       {!last && <span aria-hidden className="absolute bottom-0 left-[19px] top-11 w-px bg-sep" />}
       <span aria-hidden className={`display z-[1] grid h-10 w-10 place-items-center rounded-full text-[19px] ${track.practice ? "" : "border border-sep bg-card text-label2"}`}
         style={track.practice ? { background: "var(--accent-fill)", color: "var(--accent-ink)" } : undefined}>{track.order}</span>
       <div className="min-w-0">
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pt-1.5">
+        <button onClick={onToggle} aria-expanded={open} aria-controls={`path-${track.id}`}
+          className="group -mx-3 -mt-1.5 flex w-[calc(100%+24px)] flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-fill">
           <div className="min-w-0">
             <h3 className="text-[19px] font-semibold tracking-tight">{track.title}</h3>
-            <p className="mt-0.5 text-[13.5px] text-label2">{track.summary}</p>
+            <p className="mt-0.5 text-[13.5px] text-label2">{track.summary} <span className="text-label3">· {rows.length} {rows.length === 1 ? "concept" : "concepts"}</span></p>
           </div>
-          {track.practice
-            ? <span className="chip chip-accent">{mastered} of {rows.length} mastered</span>
-            : <span className="chip"><BookOpen size={12} />Lessons · practice coming soon</span>}
-        </div>
-        {groups.map((g) => (
+          <span className="flex items-center gap-3">
+            {track.practice
+              ? <span className="chip chip-accent">{mastered} of {rows.length} mastered</span>
+              : <span className="chip"><BookOpen size={12} />Lessons · practice coming soon</span>}
+            <ChevronDown size={18} className={`text-label3 transition-transform duration-200 group-hover:text-label ${open ? "rotate-180" : ""}`} />
+          </span>
+        </button>
+        {open && <div id={`path-${track.id}`} className="mt-4">{groups.map((g) => (
           <div key={g || "all"} className="mb-4 last:mb-0">
             {g && <p className="eyebrow mb-2">{g}</p>}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {rows.filter((r) => (r.group ?? "") === g).map((c, i) => <ConceptCard key={c.id} c={c} i={i} />)}
             </div>
           </div>
-        ))}
+        ))}</div>}
       </div>
     </li>
   );

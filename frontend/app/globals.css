@@ -190,6 +190,12 @@ body {
     content: ""; position: absolute; left: -8px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill);
   }
   .navitem[aria-current="page"] .navicon { color: var(--accent); }
+  /* a closed sidebar group that contains the current page keeps the "you are here" marker */
+  .navitem[aria-current="true"] { background: var(--fill); color: var(--label); }
+  .navitem[aria-current="true"]::before {
+    content: ""; position: absolute; left: -8px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-fill);
+  }
+  .navitem[aria-current="true"] .navicon { color: var(--accent); }
   .navitem[aria-disabled="true"] { opacity: 0.45; cursor: default; pointer-events: none; }
   .navicon { color: var(--label-3); flex-shrink: 0; }
   .navgroup { padding: 18px 10px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--label-3); }

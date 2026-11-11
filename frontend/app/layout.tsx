@@ -3,6 +3,7 @@ import { Barlow_Condensed, Manrope } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/lib/auth";
 import { StatsProvider } from "@/lib/stats";
+import { ConceptsProvider } from "@/lib/concepts";
 import "./globals.css";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
@@ -31,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning className={`${manrope.variable} ${barlow.variable}`}>
       <body className="min-h-full">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <AuthProvider><StatsProvider>{children}</StatsProvider></AuthProvider>
+          <AuthProvider><StatsProvider><ConceptsProvider>{children}</ConceptsProvider></StatsProvider></AuthProvider>
         </ThemeProvider>
       </body>
     </html>

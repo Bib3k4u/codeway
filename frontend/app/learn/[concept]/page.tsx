@@ -63,16 +63,28 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
     return () => { clearTimeout(t); window.removeEventListener("hashchange", jump); };
   }, [toc]);
 
-  // scroll-spy: highlight the section currently at the top of the viewport
+  // scroll-spy: the current section is the last heading that has passed under the sticky header (or the last one
+  // once the page is scrolled to the bottom). Recomputed on every scroll, so it follows any scroll position.
   useEffect(() => {
     if (!toc.length) return;
-    const els = toc.map((t) => document.getElementById(t.id)).filter((e): e is HTMLElement => !!e);
-    const obs = new IntersectionObserver((entries) => {
-      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-      if (visible[0]) setActiveId(visible[0].target.id);
-    }, { rootMargin: "-72px 0px -65% 0px" });
-    els.forEach((e) => obs.observe(e));
-    return () => obs.disconnect();
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const line = 96;
+      let current = toc[0].id;
+      for (const t of toc) {
+        const el = document.getElementById(t.id);
+        if (el && el.getBoundingClientRect().top <= line) current = t.id;
+      }
+      const doc = document.scrollingElement ?? document.documentElement;
+      if (Math.ceil(window.innerHeight + doc.scrollTop) >= doc.scrollHeight - 2) current = toc[toc.length - 1].id;
+      setActiveId((prev) => (prev === current ? prev : current));
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(update); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    onScroll();
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (frame) cancelAnimationFrame(frame); };
   }, [toc]);
 
   const go = (id: string) => (e: React.MouseEvent) => {
