@@ -1,0 +1,97 @@
+# Build, test and deploy the backend to the EC2 test server whenever backend code changes on master.
+#
+# Needs (set once by deploy/ec2/setup-github-deploy.sh):
+#   repo variable AWS_ROLE_ARN  IAM role this workflow assumes through GitHub OIDC (no stored AWS keys). It may only
+#                               look up the instance and open/close SSH on the codeway-sg security group.
+#   repo secret   EC2_SSH_KEY   private deploy key for ec2-user on the server
+# Server config (DB, AI keys, AUTH_SECRET) stays on the server in /opt/codeway/codeway.env and is never in GitHub.
+name: Deploy backend
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "backend/**"
+      - "deploy/ec2/codeway.service"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  INSTANCE_NAME: codeway-backend
+  SG_NAME: codeway-sg
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build and test
+        working-directory: backend
+        run: mvn -B -q package
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find the server and open SSH to this runner
+        run: |
+          HOST=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          [ -n "$HOST" ] && [ "$HOST" != None ] || { echo "::error::No running instance tagged $INSTANCE_NAME (stopped?)"; exit 1; }
+          SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=$SG_NAME" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          RUNNER_IP=$(curl -fs https://checkip.amazonaws.com | tr -d '[:space:]')
+          aws ec2 authorize-security-group-ingress --group-id "$SG" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=$RUNNER_IP/32,Description=github-actions}]"
+          echo "HOST=$HOST" >> "$GITHUB_ENV"; echo "SG=$SG" >> "$GITHUB_ENV"; echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+          for i in $(seq 1 12); do $SSH ec2-user@"$HOST" true && break; sleep 5; done
+          JAR=$(ls backend/target/codeway-backend-*.jar | head -1)
+          scp -i ~/.ssh/deploy_key -q "$JAR" ec2-user@"$HOST":/tmp/codeway-backend.jar
+          scp -i ~/.ssh/deploy_key -q deploy/ec2/codeway.service ec2-user@"$HOST":/tmp/codeway.service
+          $SSH ec2-user@"$HOST" 'sudo bash -s' <<'REMOTE'
+          set -euo pipefail
+          [ -f /opt/codeway/codeway.env ] || { echo "Server not set up yet: run ./deploy/ec2/launch.sh once"; exit 1; }
+          if ! cmp -s /tmp/codeway.service /etc/systemd/system/codeway.service; then
+            install -m 644 /tmp/codeway.service /etc/systemd/system/codeway.service && systemctl daemon-reload
+          fi
+          install -o codeway -g codeway -m 644 /tmp/codeway-backend.jar /opt/codeway/codeway-backend.jar
+          rm -f /tmp/codeway-backend.jar /tmp/codeway.service
+          systemctl restart codeway
+          for i in $(seq 1 90); do curl -fs localhost:8080/api/health >/dev/null && { echo "healthy"; break; }; sleep 2; done
+          journalctl -u codeway -n 200 --no-pager | grep -E '\[seed\]|Started Codeway|ERROR' | tail -8 || true
+          curl -fs localhost:8080/api/health >/dev/null || { echo "Backend did not become healthy"; journalctl -u codeway -n 60 --no-pager; exit 1; }
+          REMOTE
+
+      - name: Close SSH again
+        if: always()
+        run: |
+          [ -z "${SG:-}" ] || aws ec2 revoke-security-group-ingress --group-id "$SG" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=$RUNNER_IP/32}]" || true
+          rm -f ~/.ssh/deploy_key

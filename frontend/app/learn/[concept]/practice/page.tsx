@@ -1,0 +1,714 @@
+"use client";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, Check, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, X, XCircle, Trophy, Terminal } from "lucide-react";
+import AppShell from "@/components/AppShell";
+import CodeEditor from "@/components/CodeEditor";
+import Markdown from "@/components/Markdown";
+import Ring from "@/components/Ring";
+import Splitter from "@/components/Splitter";
+import Confetti from "@/components/Confetti";
+import { useStats } from "@/lib/stats";
+import { recordVisit } from "@/lib/lang";
+import LangMenu from "@/components/LangMenu";
+import ResetMenu from "@/components/ResetMenu";
+import { usePref } from "@/lib/prefs";
+import { api, saveDraftOnExit, type Files, type Hint, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+
+type Busy = null | "main" | "tests" | "submit" | "hint";
+const hintNames = ["Nudge", "Concept", "Partial code", "Solution"];
+
+export default function Practice() {
+  const { concept } = useParams<{ concept: string }>();
+  const router = useRouter();
+  const [start, setStart] = useState<StartResp | null>(null);
+  const [error, setError] = useState("");
+  const [files, setFiles] = useState<Files>({});
+  const [open, setOpen] = useState<string[]>([]);
+  const [active, setActive] = useState("");
+  const [busy, setBusy] = useState<Busy>(null);
+  const [run, setRun] = useState<RunResp | null>(null);
+  const [left, setLeft] = useState<"brief" | "hints">("brief");
+  const [bottom, setBottom] = useState<"console" | "tests">("console");
+  const [hints, setHints] = useState<Hint[]>([]);
+  const [sheet, setSheet] = useState<null | "confidence" | "result" | "retry">(null);
+  const [retry, setRetry] = useState<SubmitResp | null>(null);
+  const [confirmReset, setConfirmReset] = useState<null | "file" | "all">(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
+  const [result, setResult] = useState<SubmitResp | null>(null);
+  const [newName, setNewName] = useState<string | null>(null);
+  const [startKey, setStartKey] = useState(0);
+  const [restored, setRestored] = useState(false);
+  const { refresh: refreshStats } = useStats();
+  const [party, setParty] = useState(false);
+  const [lastMode, setLastMode] = useState<"main" | "tests">("main");
+
+  // ---- telemetry ----
+  const t0 = useRef(0);
+  const sentFirst = useRef(false);
+  const queue = useRef<{ attemptId: number; type: string; payload: object }[]>([]);
+  const attemptId = start?.attemptId;
+
+  const flush = useCallback(async () => {
+    if (!queue.current.length) return;
+    const events = queue.current.splice(0);
+    try { await api("/telemetry", { events }); } catch { /* telemetry is best-effort */ }
+  }, []);
+  useEffect(() => {
+    const id = setInterval(flush, 6000);
+    return () => { clearInterval(id); flush(); };
+  }, [flush]);
+
+  // ---- workspace layout (sizes persist between visits) ----
+  const wsRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLElement>(null);
+  const [descW, setDescW] = usePref("descW", "380");
+  const [descHidden, setDescHidden] = usePref("descHidden", "0");
+  const [consoleH, setConsoleH] = usePref("consoleH", "230");
+  const [consoleOpen, setConsoleOpen] = usePref("consoleOpen", "1");
+  const [focus, setFocus] = useState(false);
+  const descWidth = Math.min(680, Math.max(280, Number(descW) || 380));
+  // In focus mode the brief starts hidden but can be shown; outside it, the saved preference applies.
+  const [focusBrief, setFocusBrief] = useState(false);
+  const showDesc = focus ? focusBrief : descHidden !== "1";
+  const toggleBrief = () => (focus ? setFocusBrief((v) => !v) : setDescHidden(descHidden === "1" ? "0" : "1"));
+
+  const toggleFocus = useCallback((on: boolean) => {
+    setFocus(on);
+    if (on) document.documentElement.requestFullscreen?.().catch(() => {});
+    else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  }, []);
+  useEffect(() => {
+    const onFs = () => { if (!document.fullscreenElement) setFocus(false); };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && focus && !document.fullscreenElement) { toggleFocus(false); return; }
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "b" && !e.shiftKey) { e.preventDefault(); toggleBrief(); }
+      else if (k === "f" && e.shiftKey) { e.preventDefault(); toggleFocus(!focus); }
+      else if (e.key === "Enter" && busy === null && attemptId) { e.preventDefault(); e.stopPropagation(); exec(e.shiftKey ? "tests" : "main"); }
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  });
+  const moveDesc = (x: number) => {
+    const r = wsRef.current?.getBoundingClientRect(); if (!r) return;
+    setDescW(String(Math.round(Math.min(Math.min(680, r.width * 0.6), Math.max(280, x - r.left - 12)))));
+  };
+  const moveConsole = (y: number) => {
+    const r = rightRef.current?.getBoundingClientRect(); if (!r) return;
+    setConsoleH(String(Math.round(Math.min(r.height * 0.7, Math.max(96, r.bottom - y - 17)))));
+  };
+
+  // ---- autosave: debounce edits, and flush when the tab is hidden or closed ----
+  const saved = useRef<Files | null>(null);
+  const filesRef = useRef<Files>({});
+  useEffect(() => { filesRef.current = files; }, [files]);
+  useEffect(() => {
+    if (!attemptId || sheet === "result" || saved.current === files || Object.keys(files).length === 0) return;
+    const t = setTimeout(() => {
+      saved.current = files;
+      api(`/attempts/${attemptId}/draft`, { files }, "PUT").catch(() => { saved.current = null; });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [files, attemptId, sheet]);
+  useEffect(() => {
+    if (!attemptId) return;
+    const flushNow = () => {
+      if (document.visibilityState === "hidden" && saved.current !== filesRef.current && Object.keys(filesRef.current).length) {
+        saved.current = filesRef.current; saveDraftOnExit(attemptId, filesRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange", flushNow);
+    window.addEventListener("pagehide", flushNow);
+    return () => { document.removeEventListener("visibilitychange", flushNow); window.removeEventListener("pagehide", flushNow); };
+  }, [attemptId]);
+
+  // ---- load challenge (or resume the unfinished one) ----
+  const started = useRef(-1);
+  useEffect(() => {
+    if (started.current === startKey) return;
+    started.current = startKey;
+    recordVisit("java");
+    api<StartResp>("/challenges/next", { language: "java", concept })
+      .then((r) => {
+        const initial = r.draft ?? r.challenge.files;
+        saved.current = initial;
+        setStart(r); setFiles(initial);
+        const names = Object.keys(initial);
+        const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
+        setOpen([first]); setActive(first);
+        setHints(r.hints ?? []);
+        if (r.lastRun) setRun(r.lastRun);
+        if (r.resumed) { setRestored(true); setTimeout(() => setRestored(false), 6000); }
+        t0.current = performance.now(); sentFirst.current = r.resumed;
+      })
+      .catch((e) => setError(e.message));
+  }, [concept, startKey]);
+
+  function onEdit(path: string, value: string) {
+    if (!attemptId || value === files[path]) return;
+    if (!sentFirst.current) {
+      sentFirst.current = true;
+      queue.current.push({ attemptId, type: "first_keystroke", payload: { ms: Math.round(performance.now() - t0.current) } });
+    }
+    if ((files[path]?.length ?? 0) - value.length > 60) queue.current.push({ attemptId, type: "churn", payload: { removed: files[path].length - value.length } });
+    setFiles((f) => ({ ...f, [path]: value }));
+  }
+
+  async function exec(mode: "main" | "tests") {
+    if (!attemptId) return;
+    setBusy(mode); setLastMode(mode);
+    if (mode === "tests") { setBottom("tests"); setConsoleOpen("1"); }
+    try {
+      const r = await api<RunResp>("/run", { attemptId, files, mode });
+      setRun(r); setConsoleOpen("1"); refreshStats();
+      setBottom(mode === "tests" && r.compiled ? "tests" : "console");
+      if (!r.compiled && r.diagnostics[0]?.file && files[r.diagnostics[0].file] !== undefined) openFile(r.diagnostics[0].file);
+    } catch (e) { setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
+    finally { setBusy(null); }
+  }
+
+  /** finish=true ends the attempt with the current result ("Move on"). */
+  async function submit(finish = false) {
+    if (!attemptId) return;
+    setBusy("submit"); setBottom("tests"); setConsoleOpen("1");
+    try {
+      await flush();
+      const r = await api<SubmitResp>(`/attempts/${attemptId}/submit`, { files, confidence, finish });
+      setRun(r); refreshStats();
+      if (!r.final) {                       // not every test passed: show why, let them fix and resubmit
+        setRetry(r); setSheet("retry");
+        if (!r.compiled) setBottom("console");
+        return;
+      }
+      setRetry(null); setResult(r); setSheet("result");
+      if (r.allPassed && r.delta >= 0) setParty(true);
+    } catch (e) { setSheet(null); setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
+    finally { setBusy(null); }
+  }
+
+  async function getHint() {
+    if (!attemptId) return;
+    setBusy("hint"); setLeft("hints");
+    try {
+      const failures = run?.tests.filter((t) => !t.passed).map((t) => `${t.name}: ${t.message}`).join("\n");
+      const h = await api<Hint>(`/attempts/${attemptId}/hint`, { files, failures });
+      setHints((x) => [...x, h]);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  // ---- reset to the starting template ----
+  const starter = start?.challenge.files ?? {};
+  const fileHasTemplate = active in starter;
+  const fileChanged = fileHasTemplate && files[active] !== starter[active];
+  const anyChanged = Object.keys(files).length !== Object.keys(starter).length || Object.keys(starter).some((k) => files[k] !== starter[k]);
+  function doReset(kind: "file" | "all") {
+    if (kind === "file") {
+      if (fileHasTemplate) setFiles((f) => ({ ...f, [active]: starter[active] }));
+    } else {
+      setFiles({ ...starter });
+      const keep = open.filter((n) => n in starter);
+      const nextOpen = keep.length ? keep : [Object.keys(starter)[0]];
+      setOpen(nextOpen);
+      if (!(active in starter)) setActive(nextOpen[0]);
+      setRun(null);
+    }
+    setConfirmReset(null);
+  }
+
+  function openFile(name: string) { setOpen((o) => (o.includes(name) ? o : [...o, name])); setActive(name); }
+  function closeTab(name: string) {
+    setOpen((o) => { const n = o.filter((x) => x !== name); if (active === name) setActive(n[n.length - 1] ?? ""); return n; });
+  }
+  function addFile() {
+    let n = (newName ?? "").trim();
+    if (!n) { setNewName(null); return; }
+    if (!n.endsWith(".java")) n += ".java";
+    if (!/^[A-Za-z0-9_]+\.java$/.test(n) || files[n] !== undefined) { setNewName(null); return; }
+    const cls = n.replace(".java", "");
+    setFiles((f) => ({ ...f, [n]: `public class ${cls} {\n    \n}\n` })); openFile(n); setNewName(null);
+  }
+
+  const endParty = useCallback(() => setParty(false), []);
+  const diagnostics = run?.diagnostics ?? [];
+  const nextChallenge = () => { setSheet(null); setResult(null); setRun(null); setHints([]); setStart(null); setError(""); setConfidence(null); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
+  const passing = run?.tests.filter((t) => t.passed).length ?? 0;
+  const hintLevel = hints.length;
+
+  if (error && !start) {
+    return (
+      <AppShell>
+        <div className="card mx-auto max-w-md p-8 text-center rise">
+          <XCircle className="mx-auto mb-3 text-bad" size={36} />
+          <h1 className="mb-2 text-xl font-semibold">Couldn&apos;t start a challenge</h1>
+          <p className="mb-6 text-sm text-label2">{error}</p>
+          <Link href="/dashboard" className="btn btn-primary">Back to dashboard</Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!start) {
+    return (
+      <AppShell>
+        <div className="mx-auto mt-24 max-w-sm text-center rise">
+          <Loader2 className="mx-auto mb-5 animate-spin text-accent" size={30} />
+          <h1 className="mb-1 text-xl font-semibold tracking-tight">Preparing your challenge</h1>
+          <p className="text-sm text-label2">Choosing one that matches your level. Generated challenges are tested before you see them, so this can take a moment.</p>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const ch = start.challenge;
+  const crumb = (
+    <div className="hidden items-center gap-2 text-sm text-label2 md:flex">
+      <ChevronLeft size={14} />
+      <Link href={`/learn/${concept}`} className="navlink hover:text-label">Lesson</Link>
+      <span className="text-label3">/</span>
+      <span className="font-medium text-label">{ch.title}</span>
+      <span className="chip">Level {ch.difficulty}</span>
+      <span className="chip chip-accent">{ch.scaffolding === "HEAVY" ? "Guided" : ch.scaffolding === "PARTIAL" ? "Skeleton" : "From scratch"}</span>
+    </div>
+  );
+
+  return (
+    <AppShell fluid left={crumb}>
+      <div ref={wsRef} className={focus ? "fixed inset-0 z-[55] flex bg-card max-lg:flex-col" : "flex h-full min-h-0 bg-card max-lg:h-auto max-lg:flex-col max-lg:overflow-auto"}>
+        {/* ---------- Left: brief & hints ---------- */}
+        {showDesc && (<>
+        <section style={{ width: descWidth }} className="pane shrink-0 max-lg:!w-full max-lg:max-h-[50vh] max-lg:border-b max-lg:border-sep" aria-label="Challenge brief">
+          <div className="pane-head justify-between">
+            <div className="flex self-stretch" role="tablist" aria-label="Brief and hints">
+              <button role="tab" className="ptab" aria-selected={left === "brief"} onClick={() => setLeft("brief")}>Brief</button>
+              <button role="tab" className="ptab" aria-selected={left === "hints"} onClick={() => setLeft("hints")}>Hints{hintLevel > 0 && <span className="chip !h-[18px] !px-1.5 !text-[10px]">{hintLevel}</span>}</button>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={getHint} disabled={busy !== null || hintLevel >= 4}
+              title={hintLevel >= 3 ? "Shows the full solution and lowers mastery" : "Opt-in help. Costs a little mastery"}>
+              {busy === "hint" ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
+              {hintLevel >= 4 ? "No more hints" : hintLevel === 3 ? "Show solution" : "Need a hint?"}
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+            {left === "brief" ? (
+              <>
+                <Markdown compact>{ch.descriptionMd}</Markdown>
+                {ch.sampleOutput && !/##\s*Example/i.test(ch.descriptionMd) && (
+                  <section className="mt-6">
+                    <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-label3">Example output</h3>
+                    <pre className="overflow-auto rounded-xl border border-sep bg-card2 p-3 font-mono text-[12.5px] leading-relaxed">{ch.sampleOutput}</pre>
+                    <p className="mt-1.5 text-xs text-label3">What a finished Main prints. Your own demo may differ in values, but the format is a good guide.</p>
+                  </section>
+                )}
+                {ch.testNames.length > 0 && (
+                  <section className="mt-6">
+                    <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-label3">Your code is checked for</h3>
+                    <ul className="space-y-1.5">
+                      {ch.testNames.map((n, i) => (
+                        <li key={i} className="flex items-start gap-2.5 text-[14px]">
+                          {run?.tests[i] ? (run.tests[i].passed ? <Check size={16} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-bad" />)
+                            : <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-sep" />}
+                          <span>{n}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </>
+            ) : (
+              hints.length === 0 ? (
+                <div className="mt-10 text-center text-sm text-label2">
+                  <Lightbulb className="mx-auto mb-3 text-warn" size={28} />
+                  <p className="mb-1 font-medium text-label">Try first, hint second.</p>
+                  <p>Hints escalate: nudge, concept, partial code, solution. Each one lowers what this attempt earns.</p>
+                </div>
+              ) : (
+                <ol className="space-y-4">
+                  {hints.map((h) => (
+                    <li key={h.level} className="pop rounded-xl border border-sep bg-card2 p-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className={`chip ${h.kind === "solution" ? "chip-warn" : "chip-accent"}`}>Level {h.level} · {hintNames[h.level - 1]}</span>
+                        <span className="text-[11px] text-label3">{h.cost}</span>
+                      </div>
+                      <Markdown compact>{h.text}</Markdown>
+                      {h.files && Object.entries(h.files).map(([n, c]) => (
+                        <details key={n} className="mt-2"><summary className="cursor-pointer text-[13px] font-medium text-accent">{n}</summary>
+                          <pre className="mt-2 overflow-auto rounded-xl bg-fill p-3 font-mono text-[12px] leading-relaxed">{c}</pre></details>
+                      ))}
+                    </li>
+                  ))}
+                </ol>
+              )
+            )}
+          </div>
+        </section>
+        <div className="flex max-lg:hidden"><Splitter orientation="vertical" label="Resize brief" onMove={moveDesc} onNudge={(d) => setDescW(String(descWidth + d))} onReset={() => setDescW("380")} /></div>
+        </>)}
+
+        {/* ---------- Right: editor ---------- */}
+        <section ref={rightRef} className="flex min-h-0 min-w-0 flex-1 flex-col max-lg:min-h-[640px]" aria-label="Code editor">
+          <div className="pane flex-1">
+            <div className="pane-head !pr-2.5">
+              <button className="btn btn-icon btn-sm btn-ghost max-lg:hidden" onClick={toggleBrief}
+                aria-label={showDesc ? "Hide brief" : "Show brief"} aria-pressed={showDesc} title={`${showDesc ? "Hide" : "Show"} brief (⌘B)`}>
+                <PanelLeft size={16} />
+              </button>
+              <LangMenu value="java" />
+              <span aria-hidden className="mx-1 h-5 w-px bg-sep" />
+              <div className="flex min-w-0 flex-1 self-stretch overflow-x-auto" role="tablist" aria-label="Open files">
+                {open.map((n) => (
+                  <div key={n} role="tab" aria-selected={n === active} onClick={() => setActive(n)}
+                    className="ptab group shrink-0">
+                    <FileCode2 size={14} />{n}
+                    {diagnostics.some((d) => d.file === n && d.severity === "error") && <span className="h-1.5 w-1.5 rounded-full bg-bad" />}
+                    {open.length > 1 && <button aria-label={`Close ${n}`} onClick={(e) => { e.stopPropagation(); closeTab(n); }} className="opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"><X size={13} /></button>}
+                  </div>
+                ))}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <ResetMenu fileName={active} fileHasTemplate={fileHasTemplate} fileChanged={fileChanged} anyChanged={anyChanged}
+                  onResetFile={() => setConfirmReset("file")} onResetAll={() => setConfirmReset("all")} disabled={busy !== null} />
+                <button className="btn btn-secondary btn-sm" onClick={() => exec("main")} disabled={busy !== null} title="Run (⌘↵)">
+                  {busy === "main" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}Run
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => exec("tests")} disabled={busy !== null} title="Run tests (⌘⇧↵)">
+                  {busy === "tests" ? <Loader2 size={14} className="animate-spin" /> : <TestTube2 size={14} />}Run tests
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={() => setSheet("confidence")} disabled={busy !== null}><Send size={14} />Submit</button>
+                <button className="btn btn-icon btn-sm btn-secondary" onClick={() => toggleFocus(!focus)} aria-label={focus ? "Exit focus mode" : "Focus mode"} aria-pressed={focus} title={focus ? "Exit focus mode (Esc)" : "Focus mode (⌘⇧F)"}>
+                  {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-1">
+              <nav className="hidden w-[176px] shrink-0 flex-col border-r border-sep bg-card2 p-2 sm:flex" aria-label="Project files">
+                <div className="mb-1 flex items-center justify-between px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-label3">
+                  Files
+                  <button aria-label="New file" title="New file" onClick={() => setNewName("")} className="rounded p-0.5 hover:bg-fill"><Plus size={14} /></button>
+                </div>
+                <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
+                  {fileNames.map((n) => (
+                    <button key={n} onClick={() => openFile(n)}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] ${n === active ? "bg-fill font-semibold text-label" : "text-label2 hover:bg-fill hover:text-label"}`}>
+                      <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>
+                    </button>
+                  ))}
+                  {newName !== null && (
+                    <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onBlur={addFile}
+                      onKeyDown={(e) => { if (e.key === "Enter") addFile(); if (e.key === "Escape") setNewName(null); }}
+                      placeholder="Name.java" className="w-full rounded-lg bg-fill px-2 py-1.5 text-[13px] outline-none ring-2 ring-accent/40" />
+                  )}
+                </div>
+              </nav>
+              <div className="min-w-0 flex-1">
+                {active && files[active] !== undefined && <CodeEditor path={active} value={files[active]} onChange={(v) => onEdit(active, v)} diagnostics={diagnostics} />}
+              </div>
+            </div>
+          </div>
+
+          {/* ---------- Console / tests ---------- */}
+          {consoleOpen === "1" && <Splitter orientation="horizontal" label="Resize console" onMove={moveConsole} onNudge={(d) => setConsoleH(String((Number(consoleH) || 230) - d))} onReset={() => setConsoleH("230")} />}
+          <div className={`pane shrink-0 ${consoleOpen === "1" ? "" : "border-t border-sep"}`} style={consoleOpen === "1" ? { height: Number(consoleH) || 230 } : undefined}>
+            <div className="pane-head justify-between">
+              <div className="flex self-stretch" role="tablist" aria-label="Output">
+                <button role="tab" className="ptab" aria-selected={bottom === "console"} onClick={() => { setBottom("console"); setConsoleOpen("1"); }}><Terminal size={13} />Console</button>
+                <button role="tab" className="ptab" aria-selected={bottom === "tests"} onClick={() => { setBottom("tests"); setConsoleOpen("1"); }}>{busy === "tests" || busy === "submit" ? <Loader2 size={13} className="animate-spin" /> : <TestTube2 size={13} />}Tests{busy !== "tests" && busy !== "submit" && run && run.tests.length > 0 && <span className={`text-[11px] ${passing === run.tests.length ? "text-ok" : "text-warn"}`}>{passing}/{run.tests.length}</span>}</button>
+              </div>
+              <div className="flex items-center gap-2">
+                {run && busy !== "tests" && busy !== "submit" && <span className="text-xs text-label3">{run.compiled ? `Compiled · ${run.millis} ms` : "Compile failed"}</span>}
+                <button className="btn btn-icon btn-sm btn-ghost" onClick={() => setConsoleOpen(consoleOpen === "1" ? "0" : "1")} aria-label={consoleOpen === "1" ? "Collapse console" : "Expand console"} aria-expanded={consoleOpen === "1"}>
+                  <ChevronDown size={16} className={`transition-transform ${consoleOpen === "1" ? "" : "rotate-180"}`} />
+                </button>
+              </div>
+            </div>
+            {consoleOpen === "1" && <div className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed">
+              {bottom === "tests" && (busy === "tests" || busy === "submit") ? <RunningTests names={ch.testNames} submitting={busy === "submit"} />
+                : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
+                : bottom === "console" ? (
+                  <div className="space-y-2">
+                    {run.diagnostics.map((d, i) => (
+                      <button key={i} onClick={() => files[d.file] !== undefined && openFile(d.file)} className="block w-full rounded-lg bg-badsoft px-3 py-2 text-left text-bad hover:brightness-95">
+                        <span className="font-semibold">{d.file}:{d.line}</span> {d.message}
+                      </button>
+                    ))}
+                    {run.stdout && <pre className="whitespace-pre-wrap">{run.stdout}</pre>}
+                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && (
+                      run.stdout.trim() === ch.sampleOutput.trim()
+                        ? <p className="font-sans text-[13px] text-ok"><Check size={14} className="mr-1 inline" />Matches the example output.</p>
+                        : (
+                          <details className="font-sans text-[13px] text-label2">
+                            <summary className="cursor-pointer text-accent">Compare with the example output</summary>
+                            <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-fill p-3 font-mono text-[12px] text-label">{ch.sampleOutput}</pre>
+                          </details>
+                        )
+                    )}
+                    {run.stderr && <pre className="whitespace-pre-wrap text-bad">{run.stderr}</pre>}
+                    {run.compiled && !run.stdout && !run.stderr && <p className="font-sans text-label3">Program finished with no output.</p>}
+                  </div>
+                ) : run.tests.length === 0 ? <p className="font-sans text-sm text-label3">{run.compiled ? "Run tests to see results here." : "Fix the compile errors in Console first."}</p> : (
+                  <ul className="space-y-1.5 font-sans text-[13.5px]">
+                    {run.tests.map((t, i) => (
+                      <li key={i} className={`flex items-start gap-3 rounded-xl px-3 py-2 ${t.passed ? "bg-oksoft" : "bg-badsoft"}`}>
+                        {t.passed ? <Check size={16} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-bad" />}
+                        <div><p className="font-medium">{t.name}</p>{!t.passed && t.message && <p className="mt-0.5 font-mono text-[12px] text-bad">{t.message}</p>}</div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+            </div>}
+          </div>
+        </section>
+      </div>
+
+      {restored && (
+        <div className="pop pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+          <div className="sheet flex items-center gap-2.5 px-5 py-3 text-sm font-medium"><Check size={16} className="text-ok" />Welcome back. Your work was restored right where you left it.</div>
+        </div>
+      )}
+
+      {/* ---------- Reset confirmation ---------- */}
+      {confirmReset && (
+        <Overlay onClose={() => setConfirmReset(null)}>
+          <div className="pop w-full max-w-[420px] rounded-[22px] border border-sep bg-card p-7 shadow-[var(--shadow-lg)]" role="alertdialog" aria-labelledby="reset-title">
+            <span className="mb-4 grid h-11 w-11 place-items-center rounded-full bg-badsoft text-bad"><RotateCcw size={20} /></span>
+            <h2 id="reset-title" className="text-[22px] font-bold tracking-[-0.02em]">{confirmReset === "file" ? `Reset ${active}?` : "Reset all files?"}</h2>
+            <p className="mt-2 text-[14.5px] leading-relaxed text-label2">
+              {confirmReset === "file"
+                ? "Your changes to this file will be replaced with the starting template."
+                : "Every file goes back to the starting template, and any files you added are removed. Your last test results are cleared."}
+              {" "}This can&apos;t be undone.
+            </p>
+            <div className="mt-6 flex justify-end gap-2.5">
+              <button className="btn btn-secondary" onClick={() => setConfirmReset(null)} autoFocus>Cancel</button>
+              <button className="btn !bg-[var(--red)] !text-white hover:brightness-110" onClick={() => doReset(confirmReset)}>{confirmReset === "file" ? "Reset file" : "Reset all"}</button>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {/* ---------- Confidence sheet ---------- */}
+      {sheet === "confidence" && (
+        <Overlay onClose={() => busy === null && setSheet(null)}>
+          <ConfidenceSheet
+            value={confidence} onChange={setConfidence} busy={busy === "submit"} run={run}
+            onCancel={() => setSheet(null)} onSubmit={() => submit()}
+            onRunTests={() => { setSheet(null); exec("tests"); }}
+          />
+        </Overlay>
+      )}
+
+      {/* ---------- Not every test passed: fix or move on ---------- */}
+      {sheet === "retry" && retry && <FixSheet r={retry} busy={busy === "submit"} onFix={() => setSheet(null)} onMoveOn={() => submit(true)} />}
+
+      {/* ---------- Result sheet ---------- */}
+      {party && <Confetti running={sheet === "result"} onDone={endParty} />}
+      {sheet === "result" && result && <ResultSheet r={result} concept={concept} onNext={nextChallenge} onHome={() => router.push("/dashboard")} />}
+    </AppShell>
+  );
+}
+
+const LEVELS = ["Guessing", "Unsure", "Fairly sure", "Confident", "Certain"];
+
+/** "Ready to submit?" step: a 1-5 confidence rating, with the last test run as context. */
+function ConfidenceSheet({ value, onChange, busy, run, onCancel, onSubmit, onRunTests }: {
+  value: number | null; onChange: (n: number) => void; busy: boolean; run: RunResp | null;
+  onCancel: () => void; onSubmit: () => void; onRunTests: () => void;
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (busy) return;
+      if (/^[1-5]$/.test(e.key)) { e.preventDefault(); onChange(Number(e.key)); }
+      else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); onSubmit(); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [busy, onChange, onSubmit]);
+
+  const tested = run && run.tests.length > 0;
+  const passing = run?.tests.filter((t) => t.passed).length ?? 0;
+  const allPass = tested && passing === run!.tests.length;
+
+  return (
+    <div className="pop w-full max-w-[540px] overflow-hidden rounded-[24px] border border-sep bg-card shadow-[var(--shadow-lg)]" role="document">
+      <div className="px-7 pb-6 pt-7">
+        <h2 className="text-[26px] font-bold tracking-[-0.02em]">Ready to submit?</h2>
+        <p className="mt-1.5 text-[14.5px] leading-relaxed text-label2">How sure are you that every test will pass? Your answer helps the tutor pick your next challenge.</p>
+
+        {/* context: what the last run said */}
+        <div className={`mt-5 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-[13.5px] ${tested ? (allPass ? "bg-oksoft" : "bg-fill") : "bg-fill"}`}>
+          {tested ? (
+            <span className="flex items-center gap-2.5">
+              {allPass ? <Check size={16} className="text-ok" /> : <XCircle size={16} className="text-bad" />}
+              <span>Last test run: <b>{passing} of {run!.tests.length}</b> passing</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-2.5 text-label2"><TestTube2 size={16} /><span>You haven&apos;t run the tests yet</span></span>
+          )}
+          {!allPass && <button className="shrink-0 text-[13px] font-semibold text-label underline decoration-[var(--accent-fill)] decoration-2 underline-offset-4 hover:text-accent" onClick={onRunTests}>Run tests first</button>}
+        </div>
+
+        {/* 1-5 scale */}
+        <div role="radiogroup" aria-label="Confidence" className="mt-6 grid grid-cols-5 gap-2">
+          {LEVELS.map((label, i) => {
+            const n = i + 1, on = value === n;
+            return (
+              <button key={n} role="radio" aria-checked={on} onClick={() => onChange(n)}
+                className={`flex flex-col items-center gap-1 rounded-2xl border px-1 py-3.5 transition-[background-color,border-color,transform] duration-150 active:scale-[0.97] ${on
+                  ? "border-transparent bg-[var(--accent-fill)] text-[var(--accent-ink)]"
+                  : "border-sep bg-card2 text-label hover:border-[var(--label-3)]"}`}>
+                <span className="display text-[30px] leading-none">{n}</span>
+                <span className={`text-[11.5px] font-semibold leading-tight ${on ? "" : "text-label2"}`}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex justify-between px-1 text-[11.5px] text-label3"><span>Not sure at all</span>{!value && <span>Rating is optional</span>}<span>Completely sure</span></div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 border-t border-sep bg-card2 px-7 py-4">
+        <p className="hidden items-center gap-1.5 whitespace-nowrap text-[12px] text-label3 sm:flex"><span className="kbd">1</span>–<span className="kbd">5</span> to rate · <span className="kbd">↵</span> to submit</p>
+        <div className="flex flex-1 justify-end gap-2.5 sm:flex-none">
+          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>Keep working</button>
+          <button className="btn btn-primary" onClick={onSubmit} disabled={busy}>
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <><Send size={15} />Submit</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+  return (
+    <div className="fade fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/40 p-4 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
+      {children}
+    </div>
+  );
+}
+
+/** Shown while hidden tests run: every test with a spinner. */
+function RunningTests({ names, submitting }: { names: string[]; submitting: boolean }) {
+  return (
+    <div className="font-sans">
+      <p className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-label2">
+        <Loader2 size={14} className="animate-spin text-accent" />
+        {submitting ? "Submitting: compiling and running" : "Compiling and running"} {names.length || ""} hidden test{names.length === 1 ? "" : "s"}…
+      </p>
+      <ul className="space-y-1.5 text-[13.5px]">
+        {names.map((n, i) => (
+          <li key={i} className="flex items-center gap-3 rounded-xl bg-fill px-3 py-2 text-label2">
+            <Loader2 size={15} className="shrink-0 animate-spin text-label3" style={{ animationDelay: `${i * 120}ms` }} />{n}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** One failed hidden test: what it checked (its name) and why it failed (the assertion message). */
+function FailedTest({ name, message }: { name: string; message: string }) {
+  return (
+    <div className="rounded-xl border border-sep bg-card2 p-3.5">
+      <p className="flex items-start gap-2 text-[14px] font-semibold"><XCircle size={16} className="mt-0.5 shrink-0 text-bad" />{name}</p>
+      <p className="mt-2 rounded-lg bg-badsoft px-3 py-2 font-mono text-[12.5px] leading-relaxed text-bad">{message || "This test failed."}</p>
+    </div>
+  );
+}
+
+/** Submission that didn't pass every test: explain each failure, then fix and resubmit, or move on. */
+function FixSheet({ r, busy, onFix, onMoveOn }: { r: SubmitResp; busy: boolean; onFix: () => void; onMoveOn: () => void }) {
+  const failing = r.tests.filter((t) => !t.passed);
+  const pct = r.total ? (r.passed / r.total) * 100 : 0;
+  return (
+    <Overlay onClose={() => !busy && onFix()}>
+      <div className="pop w-full max-w-[580px] overflow-hidden rounded-[24px] border border-sep bg-card shadow-[var(--shadow-lg)]">
+        <div className="px-7 pb-5 pt-7">
+          <div className="flex items-start gap-3.5">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-badsoft text-bad"><XCircle size={22} /></span>
+            <div>
+              <h2 className="text-[26px] font-bold tracking-[-0.02em]">Not quite yet</h2>
+              <p className="mt-0.5 text-[14px] text-label2">
+                {r.compiled ? <><b className="text-label">{r.passed} of {r.total}</b> hidden tests passed</> : "Your code didn't compile, so no tests could run"}
+                <span className="text-label3"> · submission {r.failedSubmissions}</span>
+              </p>
+            </div>
+          </div>
+          {r.compiled && (
+            <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-fill" aria-hidden>
+              <div className="h-full rounded-full bg-[var(--accent-fill)]" style={{ width: `${pct}%` }} />
+            </div>
+          )}
+        </div>
+
+        <div className="max-h-[42vh] space-y-2.5 overflow-auto border-t border-sep px-7 py-5">
+          <p className="text-[13px] font-semibold text-label2">{r.compiled ? "What failed and why" : "Compile errors"}</p>
+          {r.compiled
+            ? failing.map((t, i) => <FailedTest key={i} name={t.name} message={t.message} />)
+            : (r.diagnostics.length ? r.diagnostics.slice(0, 5) : [{ file: "", line: 0, severity: "error", message: r.stderr || "Compilation failed." }]).map((d, i) => (
+              <p key={i} className="rounded-lg bg-badsoft px-3 py-2 font-mono text-[12.5px] leading-relaxed text-bad">{d.file && <b>{d.file}:{d.line} </b>}{d.message}</p>
+            ))}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-sep bg-card2 px-7 py-4">
+          <p className="max-w-[250px] text-[12.5px] leading-snug text-label3">Each extra submission lowers the mastery this challenge can earn. Finishing it still counts.</p>
+          <div className="flex gap-2.5">
+            <button className="btn btn-secondary" onClick={onMoveOn} disabled={busy}>{busy ? <Loader2 size={16} className="animate-spin" /> : "Move on"}</button>
+            <button className="btn btn-primary" onClick={onFix} disabled={busy}>Fix my code<ArrowRight size={16} /></button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function ResultSheet({ r, concept, onNext, onHome }: { r: SubmitResp; concept: string; onNext: () => void; onHome: () => void }) {
+  const [shown, setShown] = useState(r.scoreBefore);
+  useEffect(() => { const t = setTimeout(() => setShown(r.scoreAfter), 350); return () => clearTimeout(t); }, [r.scoreAfter]);
+  const up = r.delta >= 0;
+  return (
+    <Overlay onClose={() => {}}>
+      <div className="sheet pop w-full max-w-lg p-7">
+        <div className="mb-6 flex flex-col items-center text-center">
+          {r.mastered ? <Trophy className="mb-3 text-ok" size={34} /> : r.allPassed ? <Check className="mb-3 rounded-full bg-oksoft p-1.5 text-ok" size={34} /> : <XCircle className="mb-3 text-warn" size={34} />}
+          <h2 className="display text-[44px]">{r.mastered ? "Concept mastered" : r.allPassed ? "Nicely done" : "Not quite yet"}</h2>
+          <p className="mt-1 text-sm text-label2">{r.passed} of {r.total} tests passed · {r.minutes < 1 ? `${Math.max(1, Math.round(r.minutes * 60))} sec` : `${Math.round(r.minutes)} min`}</p>
+        </div>
+        <div className="mb-5 flex items-center justify-center gap-6 rounded-xl bg-card2 p-5 border border-sep">
+          <Ring value={shown} size={92} stroke={9} mastered={r.mastered} />
+          <div>
+            <p className="text-[13px] text-label2">Mastery</p>
+            <p className={`text-[28px] font-bold tabular-nums tracking-tight ${up ? "text-ok" : "text-bad"}`}>{up ? "+" : ""}{Math.round(r.delta * 100)}</p>
+            <p className="text-xs text-label3">Streak {r.streak}/{r.streakGoal}</p>
+          </div>
+        </div>
+        <ul className="mb-6 space-y-2 text-[14px]">
+          {r.feedback.map((f, i) => <li key={i} className="flex gap-2.5"><span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />{f}</li>)}
+        </ul>
+        {r.tests.some((t) => !t.passed) && (
+          <div className="mb-6 max-h-[30vh] space-y-2 overflow-auto">
+            {r.tests.filter((t) => !t.passed).map((t, i) => <FailedTest key={i} name={t.name} message={t.message} />)}
+          </div>
+        )}
+        <div className="flex gap-3">
+          <button className="btn btn-secondary btn-lg flex-1" onClick={onHome}>Dashboard</button>
+          {r.mastered
+            ? <Link href={`/learn/${concept}`} className="btn btn-primary btn-lg flex-1">Review lesson</Link>
+            : <button className="btn btn-primary btn-lg flex-1" onClick={onNext}>Next challenge<ArrowRight size={18} /></button>}
+        </div>
+      </div>
+    </Overlay>
+  );
+}
