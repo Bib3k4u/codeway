@@ -65,6 +65,8 @@ case "${1:-up}" in
     [ "$ok" = yes ] || die "Cancelled."
     if [ -n "$id" ]; then aws ec2 terminate-instances --instance-ids "$id" >/dev/null; say "Terminating $id"
       aws ec2 wait instance-terminated --instance-ids "$id"; fi
+    alloc="$(aws ec2 describe-addresses --filters Name=tag:Name,Values=codeway-backend-ip --query 'Addresses[0].AllocationId' --output text)"
+    [ "$alloc" = None ] || { aws ec2 release-address --allocation-id "$alloc"; say "Released Elastic IP"; }
     sg="$(sg_id)"; [ -z "$sg" ] || { aws ec2 delete-security-group --group-id "$sg"; say "Deleted $SG_NAME"; }
     aws ec2 delete-key-pair --key-name "$KEY_NAME" >/dev/null 2>&1 && rm -f "$KEY_FILE" && say "Deleted key pair"
     exit 0 ;;
