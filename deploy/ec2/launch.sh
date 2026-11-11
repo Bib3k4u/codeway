@@ -11,10 +11,12 @@
 #   ./deploy/ec2/launch.sh destroy    terminate the server and delete its security group and key pair
 #
 # Settings (environment variables): AWS_REGION (default us-east-2, same region as the Neon database),
-# INSTANCE_TYPE (default t2.micro: the free-tier type for this account), AWS_PROFILE (optional).
+# INSTANCE_TYPE (default t4g.micro: ARM Graviton, the cheapest type that fits), AWS_PROFILE (optional).
 set -euo pipefail
 export AWS_REGION="${AWS_REGION:-us-east-2}" AWS_PAGER=""
-TYPE="${INSTANCE_TYPE:-t2.micro}"
+TYPE="${INSTANCE_TYPE:-t4g.micro}"
+# Graviton types (t4g, c7g, m7g, ...) need the arm64 image; everything else is x86_64.
+case "$TYPE" in *[0-9]g.*|*[0-9]gd.*|*[0-9]gn.*) ARCH=arm64 ;; *) ARCH=x86_64 ;; esac
 NAME=codeway-backend SG_NAME=codeway-sg KEY_NAME=codeway
 KEY_FILE="$HOME/.ssh/codeway.pem"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -110,7 +112,7 @@ allow_my_ip "$sg"
 # Instance: reuse if it exists
 id="$(instance_id)"
 if [ -z "$id" ]; then
-  ami="$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  ami="$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-$ARCH \
          --query Parameter.Value --output text)"
   id="$(aws ec2 run-instances --image-id "$ami" --instance-type "$TYPE" --key-name "$KEY_NAME" \
         --security-group-ids "$sg" --credit-specification CpuCredits=standard \
@@ -118,7 +120,7 @@ if [ -z "$id" ]; then
         --metadata-options HttpTokens=required \
         --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$NAME}]" \
         --query 'Instances[0].InstanceId' --output text)"
-  say "Launched $id ($TYPE, Amazon Linux 2023)"
+  say "Launched $id ($TYPE, Amazon Linux 2023 $ARCH)"
 else
   state="$(aws ec2 describe-instances --instance-ids "$id" --query 'Reservations[0].Instances[0].State.Name' --output text)"
   say "Reusing $id ($state)"
