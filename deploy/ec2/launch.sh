@@ -3,10 +3,11 @@
 #
 #   ./deploy/ec2/launch.sh            create the server if needed, then deploy (safe to re-run)
 #   ./deploy/ec2/launch.sh ip         print the server's public IP
+#   ./deploy/ec2/launch.sh url        print the HTTPS backend URL (BACKEND_URL for the frontend); changes after stop/start
 #   ./deploy/ec2/launch.sh myip       allow your current IP again (after your network changes)
 #   ./deploy/ec2/launch.sh ssh        open a shell on the server
 #   ./deploy/ec2/launch.sh stop       stop the server (no compute charges while stopped; the IP changes on start)
-#   ./deploy/ec2/launch.sh start      start it again and print the new IP
+#   ./deploy/ec2/launch.sh start      start it again and print the new backend URL
 #   ./deploy/ec2/launch.sh destroy    terminate the server and delete its security group and key pair
 #
 # Settings (environment variables): AWS_REGION (default us-east-2, same region as the Neon database),
@@ -52,13 +53,21 @@ wait_ssh() {
 
 case "${1:-up}" in
   ip)    id="$(instance_id)"; [ -n "$id" ] || die "No server found."; public_ip "$id"; exit 0 ;;
+  url)   id="$(instance_id)"; [ -n "$id" ] || die "No server found."; ip="$(public_ip "$id")"
+         [ "$ip" != None ] || die "The server is stopped. Run: ./deploy/ec2/launch.sh start"
+         echo "https://${ip//./-}.sslip.io"; exit 0 ;;
   myip)  sg="$(sg_id)"; [ -n "$sg" ] || die "No security group found."; allow_my_ip "$sg"; exit 0 ;;
   ssh)   id="$(instance_id)"; [ -n "$id" ] || die "No server found."; exec "${SSH[@]}" "ec2-user@$(public_ip "$id")" ;;
   stop)  id="$(instance_id)"; [ -n "$id" ] || die "No server found."
          aws ec2 stop-instances --instance-ids "$id" >/dev/null; say "Stopping $id"; exit 0 ;;
   start) id="$(instance_id)"; [ -n "$id" ] || die "No server found."
          aws ec2 start-instances --instance-ids "$id" >/dev/null; aws ec2 wait instance-running --instance-ids "$id"
-         say "Running. New IP: $(public_ip "$id")  (the service starts by itself)"; exit 0 ;;
+         ip="$(public_ip "$id")"; url="https://${ip//./-}.sslip.io"
+         say "Running at $ip. Waiting for the backend and its HTTPS certificate (a minute or two)"
+         for _ in $(seq 1 60); do curl -fs "$url/api/health" >/dev/null 2>&1 && break; sleep 5; done
+         curl -fs "$url/api/health" >/dev/null 2>&1 && say "Backend is up" || say "Not answering yet; try the URL again in a minute"
+         printf '\n    BACKEND_URL=%s\n    Update it in Vercel (Settings > Environment Variables, then redeploy) and in frontend/.env.local.\n' "$url"
+         exit 0 ;;
   destroy)
     id="$(instance_id)"
     read -r -p "Terminate ${id:-<no instance>}, and delete security group $SG_NAME and key pair $KEY_NAME? Type yes: " ok

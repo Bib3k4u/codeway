@@ -12,9 +12,14 @@ aws login                      # once; or aws configure with an access key
 ./deploy/ec2/smoke-test.sh http://$(./deploy/ec2/launch.sh ip):8080
 ```
 
-`launch.sh` also has `ip`, `myip` (re-allow your IP after your network changes), `ssh`, `stop`, `start` and
+`launch.sh` also has `ip`, `url` (the HTTPS backend URL), `myip` (re-allow your IP after your network changes), `ssh`, `stop`, `start` and
 `destroy`. It uses `us-east-2` (the Neon region) unless you set `AWS_REGION`; set `INSTANCE_TYPE=t3.small` for a
 bigger box. Steps 1-3 below are the manual equivalent.
+
+HTTPS: `./deploy/ec2/enable-https.sh` serves the backend at `https://<ip-with-dashes>.sslip.io` through Caddy. The
+server uses its automatic public IP (no Elastic IP, so nothing is billed for the address while it's stopped), and a
+boot service re-points Caddy at the new address after every start. The URL therefore changes after a stop/start:
+`./deploy/ec2/launch.sh start` prints the new one; put it in Vercel's `BACKEND_URL` and redeploy the frontend.
 
 ## 1. Launch the instance (AWS console)
 
