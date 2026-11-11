@@ -20,11 +20,21 @@ public class AuthInterceptor implements HandlerInterceptor {
         String h = req.getHeader("Authorization");
         if (h != null && h.startsWith("Bearer ")) {
             var claims = verifier.verify(h.substring(7).trim());
-            if (claims.isPresent()) { req.setAttribute(ATTR, accounts.userId(claims.get())); return true; }
+            if (claims.isPresent()) {
+                long id = accounts.userId(claims.get());
+                req.setAttribute(ATTR, id);
+                CurrentUser.set(id);
+                return true;
+            }
         }
         res.setStatus(401);
         res.setContentType("application/json");
         res.getWriter().write("{\"error\":\"Unauthorized\"}");
         return false;
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest req, HttpServletResponse res, Object handler, Exception ex) {
+        CurrentUser.clear();
     }
 }

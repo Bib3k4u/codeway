@@ -84,4 +84,5 @@ Python/JavaScript appear in the UI as "Coming soon" and plug into the same runne
 | `AI_MODEL` | Azure deployment name or OpenAI model for lessons/challenges |
 | `AI_HINT_MODEL` | cheaper model for hints (defaults to `AI_MODEL`) |
 | `SUPABASE_URL` | Supabase project whose access tokens the backend accepts (public value) |
+| `AI_DAILY_USER_LIMIT`, `AI_DAILY_GLOBAL_LIMIT` | daily caps on AI calls (default 40 per user, 300 total) |
 | `RUNNER_MODE` | `local` (default) |

@@ -91,7 +91,9 @@ BACKEND_URL=http://<public-ip>:8080 npm run dev
 - **Sandbox per run:** `--network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534`,
   `--memory 512m`, `--pids-limit 128`, 1 CPU; only the run's own temp folder is mounted.
 - **Concurrency cap:** at most `RUNNER_MAX_CONCURRENT` runs at once; others wait up to 45 s.
-- **Rate limits per user:** 30 runs, 12 submits, 10 hints, 8 new challenges and 20 lessons per minute; 10 sign-in attempts per minute per IP.
+- **Daily AI caps:** 40 AI calls per user and 300 for the whole app per UTC day (`AI_DAILY_USER_LIMIT`,
+  `AI_DAILY_GLOBAL_LIMIT`). Over a cap, hints, challenges and lessons fall back to stored content instead of calling the model.
+- **Rate limits per user:** 30 runs, 12 submits, 10 hints, 8 new challenges and 20 lessons per minute.
 - **Sign-in:** GitHub through Supabase Auth. The backend accepts only Supabase access tokens signed with the
   project's asymmetric key (checked against its public JWKS), so it holds no signing secret.
 - **Prod profile:** hides internal error details from responses.

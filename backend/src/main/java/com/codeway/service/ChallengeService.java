@@ -57,7 +57,7 @@ public class ChallengeService {
         return bank.stream()
                 .min(Comparator.comparingLong((Challenge c) -> lastSeen.getOrDefault(c.id, 0L)).thenComparing(nearest))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "No challenges are available for this concept yet. Configure the AI settings in .env to generate them."));
+                        "No challenges are ready for this concept yet. Please try again later, or pick another concept."));
     }
 
     // ---- generation ----

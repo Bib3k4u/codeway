@@ -19,6 +19,14 @@ public class AiClient {
     @Value("${codeway.ai.hint-model:}") private String hintModel;
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+    private final AiQuota quota;
+
+    public AiClient(AiQuota quota) { this.quota = quota; }
+
+    /** Thrown instead of calling the model when today's AI cap is used up; callers fall back as for any AI failure. */
+    public static class QuotaExceeded extends IllegalStateException {
+        QuotaExceeded(String m) { super(m); }
+    }
 
     public boolean isConfigured() {
         return !apiKey.isBlank() && !model.isBlank() && (!apiVersion.isBlank() ? !endpoint.isBlank() : true);
@@ -29,6 +37,11 @@ public class AiClient {
 
     public String chat(String modelName, String system, String user, boolean json) {
         if (!isConfigured()) throw new IllegalStateException("AI is not configured");
+        Long userId = com.codeway.auth.CurrentUser.get();
+        if (!quota.tryAcquire(userId)) {
+            System.err.println("[ai] daily limit reached " + quota.snapshot(userId) + ", using fallback");
+            throw new QuotaExceeded("Daily AI limit reached");
+        }
         try {
             boolean azure = !apiVersion.isBlank();
             String base = endpoint.isBlank() ? "https://api.openai.com/v1" : endpoint.replaceAll("/+$", "");
