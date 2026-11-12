@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
-import { ArrowRight, BookOpen, CheckCircle2, ChevronDown, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
+import { ArrowRight, BookOpen, CheckCircle2, ChevronDown, LayoutGrid, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import ConceptIcon from "@/components/ConceptIcon";
 import Heatmap from "@/components/Heatmap";
@@ -67,7 +67,7 @@ export default function Dashboard() {
   const hours = stats ? Math.floor(stats.minutesCoding / 60) : 0;
 
   return (
-    <AppShell wide crumb={<span className="font-medium text-label">Dashboard</span>}>
+    <AppShell wide icon={LayoutGrid} crumb={<span className="font-medium text-label">Dashboard</span>}>
       {/* profile header */}
       <header className="glow rise mb-8 flex flex-wrap items-center justify-between gap-5">
         <div className="flex items-center gap-4">
@@ -118,7 +118,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         {/* activity calendar */}
-        <Section title="Activity" meta={stats ? `${stats.yearTotal} activities · ${stats.activeDays} active days in the last year` : undefined}>
+        <Section title="Activity" meta={stats ? `${stats.yearTotal} correct ${stats.yearTotal === 1 ? "submission" : "submissions"} · ${stats.activeDays} days in the last year` : undefined}>
           <div className="card p-5">{stats ? <Heatmap days={stats.days} today={stats.today} /> : <div className="skeleton h-[130px]" />}</div>
         </Section>
 
@@ -126,7 +126,7 @@ export default function Dashboard() {
           <div className="card divide-y divide-[var(--sep)]">
             {!stats ? <div className="skeleton m-4 h-24" /> : stats.recent.length === 0 ? (
               <p className="p-5 text-sm text-label3">Nothing submitted yet. Your results will show up here.</p>
-            ) : stats.recent.map((r, i) => {
+            ) : stats.recent.slice(0, 3).map((r, i) => {
               const ok = r.total > 0 && r.passed === r.total;
               return (
                 <Link key={i} href={`/learn/${r.concept}`} className="flex items-start gap-3 p-4 transition-colors hover:bg-fill">
@@ -139,6 +139,11 @@ export default function Dashboard() {
                 </Link>
               );
             })}
+            {stats && stats.recent.length > 0 && (
+              <Link href="/profile#history" className="flex items-center justify-center gap-1.5 p-3 text-[13px] font-semibold text-label2 transition-colors hover:bg-fill hover:text-label">
+                View all submissions<ArrowRight size={14} />
+              </Link>
+            )}
           </div>
         </Section>
       </div>

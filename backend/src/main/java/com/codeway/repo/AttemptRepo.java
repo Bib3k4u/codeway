@@ -8,4 +8,5 @@ public interface AttemptRepo extends JpaRepository<Attempt, Long> {
     List<Attempt> findByUserId(Long userId);
     List<Attempt> findByUserIdAndSubmittedAtIsNullOrderByStartedAtDesc(Long userId);
     List<Attempt> findByUserIdAndSubmittedAtIsNotNullOrderBySubmittedAtDesc(Long userId);
+    org.springframework.data.domain.Page<Attempt> findByUserIdAndSubmittedAtIsNotNull(Long userId, org.springframework.data.domain.Pageable page);
 }

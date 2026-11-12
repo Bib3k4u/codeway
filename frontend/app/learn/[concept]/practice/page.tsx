@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, X, XCircle, Trophy, Terminal } from "lucide-react";
+import { ArrowRight, Check, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, Trash2, X, XCircle, Trophy, Terminal } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import CodeEditor from "@/components/CodeEditor";
 import Markdown from "@/components/Markdown";
@@ -16,7 +16,9 @@ import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, saveDraftOnExit, type Files, type Hint, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, saveDraftOnExit, type Files, type Hint, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import ExpectedOutput from "@/components/practice/ExpectedOutput";
+import TestPanel from "@/components/practice/TestPanel";
 
 type Busy = null | "main" | "tests" | "submit" | "hint";
 const hintNames = ["Nudge", "Concept", "Partial code", "Solution"];
@@ -30,10 +32,12 @@ export default function Practice() {
   const lang: LangId | null = isLang(q) ? q : loading ? null : isLang(user?.preferredLanguage) ? user.preferredLanguage : "java";
   if (!lang) return <AppShell><div className="skeleton mx-auto mt-10 h-8 w-64" /></AppShell>;
   // A fresh workspace per language: switching languages starts (or resumes) that language's challenge.
-  return <Workspace key={lang} concept={concept} lang={lang} />;
+  const redo = Number(search.get("redo")) || null;
+  return <Workspace key={`${lang}:${redo ?? ""}`} concept={concept} lang={lang} redo={redo} />;
 }
 
-function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
+/** @param redo a past challenge to redo as practice (graded, mastery unchanged) */
+function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; redo: number | null }) {
   const router = useRouter();
   const { setLanguage } = useAuth();
   const { refresh: refreshConcepts } = useConcepts();
@@ -47,10 +51,12 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
   const [left, setLeft] = useState<"brief" | "hints">("brief");
   const [bottom, setBottom] = useState<"console" | "tests">("console");
   const [hints, setHints] = useState<Hint[]>([]);
-  const [sheet, setSheet] = useState<null | "confidence" | "result" | "retry">(null);
+  const [sheet, setSheet] = useState<null | "result" | "retry">(null);
   const [retry, setRetry] = useState<SubmitResp | null>(null);
   const [confirmReset, setConfirmReset] = useState<null | "file" | "all">(null);
-  const [confidence, setConfidence] = useState<number | null>(null);
+  // The last test results stay in the Tests tab even after a plain Run; runSeq replays the result animation.
+  const [testRun, setTestRun] = useState<RunResp | null>(null);
+  const [runSeq, setRunSeq] = useState(0);
   const [result, setResult] = useState<SubmitResp | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [startKey, setStartKey] = useState(0);
@@ -99,6 +105,8 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
+  // keyboard shortcuts call the latest exec (declared below) through a ref
+  const execRef = useRef<(mode: "main" | "tests") => void>(() => {});
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === "Escape" && focus && !document.fullscreenElement) { toggleFocus(false); return; }
@@ -106,7 +114,7 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
       const k = e.key.toLowerCase();
       if (k === "b" && !e.shiftKey) { e.preventDefault(); toggleBrief(); }
       else if (k === "f" && e.shiftKey) { e.preventDefault(); toggleFocus(!focus); }
-      else if (e.key === "Enter" && busy === null && attemptId) { e.preventDefault(); e.stopPropagation(); exec(e.shiftKey ? "tests" : "main"); }
+      else if (e.key === "Enter" && busy === null && attemptId) { e.preventDefault(); e.stopPropagation(); execRef.current(e.shiftKey ? "tests" : "main"); }
     };
     window.addEventListener("keydown", h, true);
     return () => window.removeEventListener("keydown", h, true);
@@ -149,7 +157,8 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
   useEffect(() => {
     if (started.current === startKey) return;
     started.current = startKey;
-    api<StartResp>("/challenges/next", { language: lang, concept })
+    const req = redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : api<StartResp>("/challenges/next", { language: lang, concept });
+    req
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
         saved.current = initial;
@@ -158,12 +167,12 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
         const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
         setOpen([first]); setActive(first);
         setHints(r.hints ?? []);
-        if (r.lastRun) setRun(r.lastRun);
+        if (r.lastRun) { setRun(r.lastRun); if (r.lastRun.tests?.length) setTestRun(r.lastRun); }
         if (r.resumed) { setRestored(true); setTimeout(() => setRestored(false), 6000); }
         t0.current = performance.now(); sentFirst.current = r.resumed;
       })
       .catch((e) => setError(e.message));
-  }, [concept, startKey, lang]);
+  }, [concept, startKey, lang, redo]);
 
   function onEdit(path: string, value: string) {
     if (!attemptId || value === files[path]) return;
@@ -182,11 +191,14 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
     try {
       const r = await api<RunResp>("/run", { attemptId, files, mode });
       setRun(r); setConsoleOpen("1"); refreshStats();
+      if (mode === "tests") { setTestRun(r); setRunSeq((n) => n + 1); }
       setBottom(mode === "tests" && r.compiled ? "tests" : "console");
       if (!r.compiled && r.diagnostics[0]?.file && files[r.diagnostics[0].file] !== undefined) openFile(r.diagnostics[0].file);
     } catch (e) { setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
     finally { setBusy(null); }
   }
+
+  useEffect(() => { execRef.current = exec; });
 
   /** finish=true ends the attempt with the current result ("Move on"). */
   async function submit(finish = false) {
@@ -194,15 +206,16 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
     setBusy("submit"); setBottom("tests"); setConsoleOpen("1");
     try {
       await flush();
-      const r = await api<SubmitResp>(`/attempts/${attemptId}/submit`, { files, confidence, finish });
+      const r = await api<SubmitResp>(`/attempts/${attemptId}/submit`, { files, finish });
       setRun(r); refreshStats(); refreshConcepts();
+      if (r.compiled) { setTestRun(r); setRunSeq((n) => n + 1); }
       if (!r.final) {                       // not every test passed: show why, let them fix and resubmit
         setRetry(r); setSheet("retry");
         if (!r.compiled) setBottom("console");
         return;
       }
       setRetry(null); setResult(r); setSheet("result");
-      if (r.allPassed && r.delta >= 0) setParty(true);
+      if (r.allPassed) setParty(true);
     } catch (e) { setSheet(null); setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
     finally { setBusy(null); }
   }
@@ -250,6 +263,21 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
     setFiles((f) => ({ ...f, [n]: info.template(n.replace(/\.[a-z]+$/, "")) })); openFile(n); setNewName(null);
   }
 
+  /** Reveal one hidden test (costs a little mastery): fills in its name and failure message in the results. */
+  async function reveal(index: number) {
+    if (!attemptId) return;
+    const r = await api<RevealResp>(`/attempts/${attemptId}/reveal`, { index });
+    const patch = (x: RunResp | null) => x && { ...x, tests: x.tests.map((t, i) => (i === index ? { ...t, name: r.name, message: r.message ?? t.message, revealed: true } : t)) };
+    setTestRun(patch); setRun(patch); setRetry((x) => (x ? (patch(x) as SubmitResp) : x));
+  }
+
+  /** Learners can delete files they created; starter files can only be reset. */
+  function deleteFile(name: string) {
+    if (name in (start?.challenge.files ?? {})) return;
+    setFiles((f) => { const n = { ...f }; delete n[name]; return n; });
+    closeTab(name);
+  }
+
   /** Saves this language's draft, then opens the same concept in another language. */
   function switchLang(l: LangId) {
     if (l === lang) return;
@@ -260,9 +288,10 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
 
   const endParty = useCallback(() => setParty(false), []);
   const diagnostics = run?.diagnostics ?? [];
-  const nextChallenge = () => { setSheet(null); setResult(null); setRun(null); setHints([]); setStart(null); setError(""); setConfidence(null); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const nextChallenge = () => { setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setStart(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
-  const passing = run?.tests.filter((t) => t.passed).length ?? 0;
+  const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
+  const [deleting, setDeleting] = useState<string | null>(null);
   const hintLevel = hints.length;
 
   if (error && !start) {
@@ -299,6 +328,7 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
       <span className="font-medium text-label">{ch.title}</span>
       <span className="chip">Level {ch.difficulty}</span>
       <span className="chip chip-accent">{ch.scaffolding === "HEAVY" ? "Guided" : ch.scaffolding === "PARTIAL" ? "Skeleton" : "From scratch"}</span>
+      {start.practice && <span className="chip" title="Redo from your history: graded, but mastery doesn't change">Practice</span>}
     </div>
   );
 
@@ -323,24 +353,26 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
             {left === "brief" ? (
               <>
                 <Markdown compact>{ch.descriptionMd}</Markdown>
-                {ch.sampleOutput && !/##\s*Example/i.test(ch.descriptionMd) && (
+                {ch.sampleOutput && (
                   <section className="mt-6">
-                    <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-label3">Example output</h3>
-                    <pre className="overflow-auto rounded-xl border border-sep bg-card2 p-3 font-mono text-[12.5px] leading-relaxed">{ch.sampleOutput}</pre>
-                    <p className="mt-1.5 text-xs text-label3">What a finished Main prints. Your own demo may differ in values, but the format is a good guide.</p>
+                    <ExpectedOutput expected={ch.sampleOutput} />
                   </section>
                 )}
                 {ch.testNames.length > 0 && (
                   <section className="mt-6">
                     <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-label3">Your code is checked for</h3>
                     <ul className="space-y-1.5">
-                      {ch.testNames.map((n, i) => (
-                        <li key={i} className="flex items-start gap-2.5 text-[14px]">
-                          {run?.tests[i] ? (run.tests[i].passed ? <Check size={16} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-bad" />)
-                            : <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-sep" />}
-                          <span>{n}</span>
-                        </li>
-                      ))}
+                      {ch.testNames.map((n, i) => {
+                        const t = testRun?.tests[i];
+                        const hidden = n.startsWith("Hidden test") && !t?.revealed;
+                        return (
+                          <li key={i} className={`flex items-start gap-2.5 text-[14px] ${hidden ? "text-label3" : ""}`}>
+                            {t ? (t.passed ? <Check size={16} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-bad" />)
+                              : hidden ? <Lock size={14} className="mt-1 shrink-0" /> : <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-sep" />}
+                            <span>{t?.revealed ? t.name : n}</span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </section>
                 )}
@@ -404,7 +436,7 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
                 <button className="btn btn-secondary btn-sm" onClick={() => exec("tests")} disabled={busy !== null} title="Run tests (⌘⇧↵)">
                   {busy === "tests" ? <Loader2 size={14} className="animate-spin" /> : <TestTube2 size={14} />}Run tests
                 </button>
-                <button className="btn btn-primary btn-sm" onClick={() => setSheet("confidence")} disabled={busy !== null}><Send size={14} />Submit</button>
+                <button className="btn btn-primary btn-sm" onClick={() => submit()} disabled={busy !== null}>{busy === "submit" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}Submit</button>
                 <button className="btn btn-icon btn-sm btn-secondary" onClick={() => toggleFocus(!focus)} aria-label={focus ? "Exit focus mode" : "Focus mode"} aria-pressed={focus} title={focus ? "Exit focus mode (Esc)" : "Focus mode (⌘⇧F)"}>
                   {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                 </button>
@@ -417,12 +449,23 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
                   <button aria-label="New file" title="New file" onClick={() => setNewName("")} className="rounded p-0.5 hover:bg-fill"><Plus size={14} /></button>
                 </div>
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
-                  {fileNames.map((n) => (
-                    <button key={n} onClick={() => openFile(n)}
-                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] ${n === active ? "bg-fill font-semibold text-label" : "text-label2 hover:bg-fill hover:text-label"}`}>
-                      <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>
-                    </button>
-                  ))}
+                  {fileNames.map((n) => {
+                    const mine = !(n in starter);
+                    return (
+                      <div key={n} className={`group flex w-full items-center rounded-lg text-[13px] ${n === active ? "bg-fill font-semibold text-label" : "text-label2 hover:bg-fill hover:text-label"}`}>
+                        <button onClick={() => openFile(n)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left" title={n}>
+                          <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>
+                        </button>
+                        {mine && (deleting === n ? (
+                          <button onClick={() => { deleteFile(n); setDeleting(null); }} onBlur={() => setDeleting(null)} autoFocus
+                            className="mr-1 shrink-0 rounded-md bg-badsoft px-1.5 py-0.5 text-[11px] font-semibold text-bad" aria-label={`Confirm delete ${n}`}>Delete</button>
+                        ) : (
+                          <button onClick={() => setDeleting(n)} aria-label={`Delete ${n}`} title="Delete file (only files you added)"
+                            className="mr-1 shrink-0 rounded-md p-1 text-label3 opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"><Trash2 size={13} /></button>
+                        ))}
+                      </div>
+                    );
+                  })}
                   {newName !== null && (
                     <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onBlur={addFile}
                       onKeyDown={(e) => { if (e.key === "Enter") addFile(); if (e.key === "Escape") setNewName(null); }}
@@ -431,7 +474,7 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
                 </div>
               </nav>
               <div className="min-w-0 flex-1">
-                {active && files[active] !== undefined && <CodeEditor path={active} value={files[active]} onChange={(v) => onEdit(active, v)} diagnostics={diagnostics} />}
+                {active && files[active] !== undefined && <CodeEditor path={active} value={files[active]} onChange={(v) => onEdit(active, v)} diagnostics={diagnostics} files={files} />}
               </div>
             </div>
           </div>
@@ -442,7 +485,7 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
             <div className="pane-head justify-between">
               <div className="flex self-stretch" role="tablist" aria-label="Output">
                 <button role="tab" className="ptab" aria-selected={bottom === "console"} onClick={() => { setBottom("console"); setConsoleOpen("1"); }}><Terminal size={13} />Console</button>
-                <button role="tab" className="ptab" aria-selected={bottom === "tests"} onClick={() => { setBottom("tests"); setConsoleOpen("1"); }}>{busy === "tests" || busy === "submit" ? <Loader2 size={13} className="animate-spin" /> : <TestTube2 size={13} />}Tests{busy !== "tests" && busy !== "submit" && run && run.tests.length > 0 && <span className={`text-[11px] ${passing === run.tests.length ? "text-ok" : "text-warn"}`}>{passing}/{run.tests.length}</span>}</button>
+                <button role="tab" className="ptab" aria-selected={bottom === "tests"} onClick={() => { setBottom("tests"); setConsoleOpen("1"); }}>{busy === "tests" || busy === "submit" ? <Loader2 size={13} className="animate-spin" /> : <TestTube2 size={13} />}Tests{busy !== "tests" && busy !== "submit" && testRun && testRun.tests.length > 0 && <span className={`text-[11px] ${passing === testRun.tests.length ? "text-ok" : "text-warn"}`}>{passing}/{testRun.tests.length}</span>}</button>
               </div>
               <div className="flex items-center gap-2">
                 {run && busy !== "tests" && busy !== "submit" && <span className="text-xs text-label3">{run.compiled ? `Compiled · ${run.millis} ms` : "Compile failed"}</span>}
@@ -452,38 +495,39 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
               </div>
             </div>
             {consoleOpen === "1" && <div className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed">
-              {bottom === "tests" && (busy === "tests" || busy === "submit") ? <RunningTests names={ch.testNames} submitting={busy === "submit"} />
-                : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
-                : bottom === "console" ? (
-                  <div className="space-y-2">
+              {bottom === "tests" ? (
+                <TestPanel key={runSeq} run={testRun} names={ch.testNames} examples={ch.examples ?? []} language={lang}
+                  running={busy === "tests" || busy === "submit"} submitting={busy === "submit"} onReveal={reveal} />
+              ) : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
+                : (
+                  <div className="space-y-3">
                     {run.diagnostics.map((d, i) => (
                       <button key={i} onClick={() => files[d.file] !== undefined && openFile(d.file)} className="block w-full rounded-lg bg-badsoft px-3 py-2 text-left text-bad hover:brightness-95">
                         <span className="font-semibold">{d.file}:{d.line}</span> {d.message}
                       </button>
                     ))}
-                    {run.stdout && <pre className="whitespace-pre-wrap">{run.stdout}</pre>}
-                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && (
-                      run.stdout.trim() === ch.sampleOutput.trim()
-                        ? <p className="font-sans text-[13px] text-ok"><Check size={14} className="mr-1 inline" />Matches the example output.</p>
-                        : (
-                          <details className="font-sans text-[13px] text-label2">
-                            <summary className="cursor-pointer text-accent">Compare with the example output</summary>
-                            <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-fill p-3 font-mono text-[12px] text-label">{ch.sampleOutput}</pre>
-                          </details>
-                        )
+                    {run.stdout && (
+                      <div>
+                        <p className="mb-1 font-sans text-[11.5px] font-semibold uppercase tracking-wider text-label3">Your output</p>
+                        <pre className="whitespace-pre-wrap">{run.stdout}</pre>
+                      </div>
                     )}
                     {run.stderr && <pre className="whitespace-pre-wrap text-bad">{run.stderr}</pre>}
                     {run.compiled && !run.stdout && !run.stderr && <p className="font-sans text-label3">Program finished with no output.</p>}
+                    {testRun && testRun.compiled && testRun.tests.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 font-sans">
+                        <span className="mr-1 text-[11.5px] font-semibold uppercase tracking-wider text-label3">Tests</span>
+                        {testRun.tests.map((t, i) => (
+                          <button key={i} onClick={() => setBottom("tests")} title={t.passed ? "Passed" : "Failed: open the Tests tab"}
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ${t.passed ? "bg-oksoft text-ok" : "bg-badsoft text-bad"}`}>
+                            {t.passed ? <span className="grid h-3.5 w-3.5 place-items-center rounded-[4px] bg-[var(--green)] text-white"><Check size={10} strokeWidth={3} /></span> : <XCircle size={13} />}
+                            <span className="max-w-[220px] truncate">{t.hidden && !t.revealed ? `Hidden ${i + 1 - testRun.tests.filter((x) => !x.hidden).length}` : t.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && <ExpectedOutput expected={ch.sampleOutput} actual={run.stdout} />}
                   </div>
-                ) : run.tests.length === 0 ? <p className="font-sans text-sm text-label3">{run.compiled ? "Run tests to see results here." : "Fix the compile errors in Console first."}</p> : (
-                  <ul className="space-y-1.5 font-sans text-[13.5px]">
-                    {run.tests.map((t, i) => (
-                      <li key={i} className={`flex items-start gap-3 rounded-xl px-3 py-2 ${t.passed ? "bg-oksoft" : "bg-badsoft"}`}>
-                        {t.passed ? <Check size={16} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-bad" />}
-                        <div><p className="font-medium">{t.name}</p>{!t.passed && t.message && <p className="mt-0.5 font-mono text-[12px] text-bad">{t.message}</p>}</div>
-                      </li>
-                    ))}
-                  </ul>
                 )}
             </div>}
           </div>
@@ -516,95 +560,13 @@ function Workspace({ concept, lang }: { concept: string; lang: LangId }) {
         </Overlay>
       )}
 
-      {/* ---------- Confidence sheet ---------- */}
-      {sheet === "confidence" && (
-        <Overlay onClose={() => busy === null && setSheet(null)}>
-          <ConfidenceSheet
-            value={confidence} onChange={setConfidence} busy={busy === "submit"} run={run}
-            onCancel={() => setSheet(null)} onSubmit={() => submit()}
-            onRunTests={() => { setSheet(null); exec("tests"); }}
-          />
-        </Overlay>
-      )}
-
       {/* ---------- Not every test passed: fix or move on ---------- */}
-      {sheet === "retry" && retry && <FixSheet r={retry} busy={busy === "submit"} onFix={() => setSheet(null)} onMoveOn={() => submit(true)} />}
+      {sheet === "retry" && retry && <FixSheet r={retry} busy={busy === "submit"} onFix={() => setSheet(null)} onMoveOn={() => submit(true)} onReveal={reveal} />}
 
       {/* ---------- Result sheet ---------- */}
       {party && <Confetti running={sheet === "result"} onDone={endParty} />}
       {sheet === "result" && result && <ResultSheet r={result} concept={concept} lang={lang} onNext={nextChallenge} onHome={() => router.push("/dashboard")} />}
     </AppShell>
-  );
-}
-
-const LEVELS = ["Guessing", "Unsure", "Fairly sure", "Confident", "Certain"];
-
-/** "Ready to submit?" step: a 1-5 confidence rating, with the last test run as context. */
-function ConfidenceSheet({ value, onChange, busy, run, onCancel, onSubmit, onRunTests }: {
-  value: number | null; onChange: (n: number) => void; busy: boolean; run: RunResp | null;
-  onCancel: () => void; onSubmit: () => void; onRunTests: () => void;
-}) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (busy) return;
-      if (/^[1-5]$/.test(e.key)) { e.preventDefault(); onChange(Number(e.key)); }
-      else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); onSubmit(); }
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [busy, onChange, onSubmit]);
-
-  const tested = run && run.tests.length > 0;
-  const passing = run?.tests.filter((t) => t.passed).length ?? 0;
-  const allPass = tested && passing === run!.tests.length;
-
-  return (
-    <div className="pop w-full max-w-[540px] overflow-hidden rounded-[24px] border border-sep bg-card shadow-[var(--shadow-lg)]" role="document">
-      <div className="px-7 pb-6 pt-7">
-        <h2 className="text-[26px] font-bold tracking-[-0.02em]">Ready to submit?</h2>
-        <p className="mt-1.5 text-[14.5px] leading-relaxed text-label2">How sure are you that every test will pass? Your answer helps the tutor pick your next challenge.</p>
-
-        {/* context: what the last run said */}
-        <div className={`mt-5 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-[13.5px] ${tested ? (allPass ? "bg-oksoft" : "bg-fill") : "bg-fill"}`}>
-          {tested ? (
-            <span className="flex items-center gap-2.5">
-              {allPass ? <Check size={16} className="text-ok" /> : <XCircle size={16} className="text-bad" />}
-              <span>Last test run: <b>{passing} of {run!.tests.length}</b> passing</span>
-            </span>
-          ) : (
-            <span className="flex items-center gap-2.5 text-label2"><TestTube2 size={16} /><span>You haven&apos;t run the tests yet</span></span>
-          )}
-          {!allPass && <button className="shrink-0 text-[13px] font-semibold text-label underline decoration-[var(--accent-fill)] decoration-2 underline-offset-4 hover:text-accent" onClick={onRunTests}>Run tests first</button>}
-        </div>
-
-        {/* 1-5 scale */}
-        <div role="radiogroup" aria-label="Confidence" className="mt-6 grid grid-cols-5 gap-2">
-          {LEVELS.map((label, i) => {
-            const n = i + 1, on = value === n;
-            return (
-              <button key={n} role="radio" aria-checked={on} onClick={() => onChange(n)}
-                className={`flex flex-col items-center gap-1 rounded-2xl border px-1 py-3.5 transition-[background-color,border-color,transform] duration-150 active:scale-[0.97] ${on
-                  ? "border-transparent bg-[var(--accent-fill)] text-[var(--accent-ink)]"
-                  : "border-sep bg-card2 text-label hover:border-[var(--label-3)]"}`}>
-                <span className="display text-[30px] leading-none">{n}</span>
-                <span className={`text-[11.5px] font-semibold leading-tight ${on ? "" : "text-label2"}`}>{label}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-2 flex justify-between px-1 text-[11.5px] text-label3"><span>Not sure at all</span>{!value && <span>Rating is optional</span>}<span>Completely sure</span></div>
-      </div>
-
-      <div className="flex items-center justify-between gap-3 border-t border-sep bg-card2 px-7 py-4">
-        <p className="hidden items-center gap-1.5 whitespace-nowrap text-[12px] text-label3 sm:flex"><span className="kbd">1</span>–<span className="kbd">5</span> to rate · <span className="kbd">↵</span> to submit</p>
-        <div className="flex flex-1 justify-end gap-2.5 sm:flex-none">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>Keep working</button>
-          <button className="btn btn-primary" onClick={onSubmit} disabled={busy}>
-            {busy ? <Loader2 size={16} className="animate-spin" /> : <><Send size={15} />Submit</>}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -621,25 +583,6 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose: ()
   );
 }
 
-/** Shown while hidden tests run: every test with a spinner. */
-function RunningTests({ names, submitting }: { names: string[]; submitting: boolean }) {
-  return (
-    <div className="font-sans">
-      <p className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-label2">
-        <Loader2 size={14} className="animate-spin text-accent" />
-        {submitting ? "Submitting: compiling and running" : "Compiling and running"} {names.length || ""} hidden test{names.length === 1 ? "" : "s"}…
-      </p>
-      <ul className="space-y-1.5 text-[13.5px]">
-        {names.map((n, i) => (
-          <li key={i} className="flex items-center gap-3 rounded-xl bg-fill px-3 py-2 text-label2">
-            <Loader2 size={15} className="shrink-0 animate-spin text-label3" style={{ animationDelay: `${i * 120}ms` }} />{n}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 /** One failed hidden test: what it checked (its name) and why it failed (the assertion message). */
 function FailedTest({ name, message }: { name: string; message: string }) {
   return (
@@ -650,8 +593,22 @@ function FailedTest({ name, message }: { name: string; message: string }) {
   );
 }
 
+/** A failed hidden test: only that it failed, with an opt-in reveal that costs a little mastery. */
+function HiddenFailure({ name, onReveal }: { name: string; onReveal: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-sep bg-card2 p-3.5">
+      <Lock size={15} className="shrink-0 text-label3" />
+      <p className="min-w-0 flex-1 text-[14px] font-semibold">{name} failed<span className="block text-[12px] font-normal text-label3">An edge case. Revealing it costs a little mastery.</span></p>
+      <button className="btn btn-secondary btn-sm" disabled={busy} onClick={async () => { setBusy(true); try { await onReveal(); } finally { setBusy(false); } }}>
+        {busy ? <Loader2 size={14} className="animate-spin" /> : "Reveal"}
+      </button>
+    </div>
+  );
+}
+
 /** Submission that didn't pass every test: explain each failure, then fix and resubmit, or move on. */
-function FixSheet({ r, busy, onFix, onMoveOn }: { r: SubmitResp; busy: boolean; onFix: () => void; onMoveOn: () => void }) {
+function FixSheet({ r, busy, onFix, onMoveOn, onReveal }: { r: SubmitResp; busy: boolean; onFix: () => void; onMoveOn: () => void; onReveal: (i: number) => Promise<void> }) {
   const failing = r.tests.filter((t) => !t.passed);
   const pct = r.total ? (r.passed / r.total) * 100 : 0;
   return (
@@ -663,7 +620,7 @@ function FixSheet({ r, busy, onFix, onMoveOn }: { r: SubmitResp; busy: boolean; 
             <div>
               <h2 className="text-[26px] font-bold tracking-[-0.02em]">Not quite yet</h2>
               <p className="mt-0.5 text-[14px] text-label2">
-                {r.compiled ? <><b className="text-label">{r.passed} of {r.total}</b> hidden tests passed</> : "Your code didn't compile, so no tests could run"}
+                {r.compiled ? <><b className="text-label">{r.passed} of {r.total}</b> tests passed</> : "Your code didn't compile, so no tests could run"}
                 <span className="text-label3"> · submission {r.failedSubmissions}</span>
               </p>
             </div>
@@ -678,7 +635,9 @@ function FixSheet({ r, busy, onFix, onMoveOn }: { r: SubmitResp; busy: boolean; 
         <div className="max-h-[42vh] space-y-2.5 overflow-auto border-t border-sep px-7 py-5">
           <p className="text-[13px] font-semibold text-label2">{r.compiled ? "What failed and why" : "Compile errors"}</p>
           {r.compiled
-            ? failing.map((t, i) => <FailedTest key={i} name={t.name} message={t.message} />)
+            ? failing.map((t, i) => t.hidden && !t.revealed
+              ? <HiddenFailure key={i} name={t.name} onReveal={() => onReveal(t.index ?? -1)} />
+              : <FailedTest key={i} name={t.name} message={t.message} />)
             : (r.diagnostics.length ? r.diagnostics.slice(0, 5) : [{ file: "", line: 0, severity: "error", message: r.stderr || "Compilation failed." }]).map((d, i) => (
               <p key={i} className="rounded-lg bg-badsoft px-3 py-2 font-mono text-[12.5px] leading-relaxed text-bad">{d.file && <b>{d.file}:{d.line} </b>}{d.message}</p>
             ))}
@@ -713,7 +672,8 @@ function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; conc
           <div>
             <p className="text-[13px] text-label2">Mastery</p>
             <p className={`text-[28px] font-bold tabular-nums tracking-tight ${up ? "text-ok" : "text-bad"}`}>{up ? "+" : ""}{Math.round(r.delta * 100)}</p>
-            <p className="text-xs text-label3">Streak {r.streak}/{r.streakGoal}</p>
+            <p className="text-xs text-label3">{r.practice ? "Practice: mastery unchanged" : `Streak ${r.streak}/${r.streakGoal}`}</p>
+            {r.calibration && r.calibration !== "unrated" && <span className="chip mt-1.5 capitalize" title="Read from how you worked: first test run, number of runs, pace and help used">{r.calibration}</span>}
           </div>
         </div>
         <ul className="mb-6 space-y-2 text-[14px]">
@@ -721,7 +681,7 @@ function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; conc
         </ul>
         {r.tests.some((t) => !t.passed) && (
           <div className="mb-6 max-h-[30vh] space-y-2 overflow-auto">
-            {r.tests.filter((t) => !t.passed).map((t, i) => <FailedTest key={i} name={t.name} message={t.message} />)}
+            {r.tests.filter((t) => !t.passed).map((t, i) => <FailedTest key={i} name={t.name} message={t.hidden && !t.revealed ? "A hidden edge case failed." : t.message} />)}
           </div>
         )}
         <div className="flex gap-3">

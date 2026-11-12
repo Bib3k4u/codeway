@@ -24,9 +24,17 @@ public class LessonService {
         String md = null; String source = "fallback";
         if (ai.isConfigured()) {
             try {
-                md = ai.chat(ai.model(),
-                        "You are a warm, precise " + ConceptCatalog.label(language) + " instructor writing a short interactive lesson in Markdown. Use ## headings, short paragraphs and runnable code blocks. No preamble.",
-                        lessonPrompt(c, language), false);
+                // Keep lessons consistent across languages: translate an existing one (same story and examples)
+                // rather than writing a different lesson for each language.
+                Lesson from = null;
+                for (String other : ConceptCatalog.LANGUAGES) {
+                    if (other.equals(language)) continue;
+                    var o = repo.findByLanguageAndConcept(other, concept).filter(x -> "ai".equals(x.source));
+                    if (o.isPresent() && (from == null || ConceptCatalog.JAVA.equals(other))) from = o.get();
+                }
+                String system = "You are a warm, precise " + ConceptCatalog.label(language) + " instructor writing a short interactive lesson in Markdown. Use ## headings, short paragraphs and runnable code blocks. No preamble.";
+                md = from == null ? ai.chat(ai.model(), system, lessonPrompt(c, language), false)
+                        : ai.chat(ai.model(), system, translatePrompt(from, language), false);
                 source = "ai";
             } catch (Exception e) {
                 System.err.println("[lesson] AI failed, using fallback: " + e.getMessage());
@@ -38,6 +46,15 @@ public class LessonService {
                 + "\n\nThe full lesson isn't ready yet. Check back soon.";
         l.source = source;
         return repo.save(l);
+    }
+
+    /** Same lesson in another language: keep headings, story and examples; rewrite only code and language notes. */
+    static String translatePrompt(Lesson source, String language) {
+        String to = ConceptCatalog.label(language), from = ConceptCatalog.label(source.language);
+        return "Rewrite this " + from + " lesson for " + to + ". Keep exactly the same headings, order, story, class names (adapted to "
+                + to + " naming conventions) and examples, so a learner switching languages sees the same lesson. Convert every code block to"
+                + " idiomatic, runnable " + to + " in fenced ```" + language + " blocks, and replace " + from + "-specific remarks with the "
+                + to + " equivalent. Output only the Markdown.\n\n" + source.contentMd;
     }
 
     /** What a good lesson looks like differs by track: a concept, a principle, a pattern, or a system design. */

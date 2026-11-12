@@ -11,7 +11,7 @@ function iso(d: Date) { return d.toISOString().slice(0, 10); }
 function parse(s: string) { const [y, m, d] = s.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); }
 function fmt(s: string) { return parse(s).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }); }
 
-/** GitHub-style contribution calendar: 53 weeks, one sequential hue (yellow), hover tooltip per day. */
+/** GitHub-style calendar of correct submissions per day: 53 weeks, one sequential hue (yellow), hover tooltip per day. */
 export default function Heatmap({ days, today }: { days: Record<string, number>; today: string }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<Tip | null>(null);
@@ -46,7 +46,7 @@ export default function Heatmap({ days, today }: { days: Record<string, number>;
               fill={`var(--heat-${level(c.count)})`} stroke="var(--sep)" strokeWidth={1}
               onMouseEnter={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
-                setTip({ place: "top", x: r.left + r.width / 2, y: r.top, belowY: r.bottom, text: `${c.count === 0 ? "No" : c.count} ${c.count === 1 ? "activity" : "activities"} · ${fmt(c.date)}` });
+                setTip({ place: "top", x: r.left + r.width / 2, y: r.top, belowY: r.bottom, text: `${c.count === 0 ? "No" : c.count} correct ${c.count === 1 ? "submission" : "submissions"} · ${fmt(c.date)}` });
               }}
               onMouseLeave={() => setTip(null)} />
           ))}
@@ -63,7 +63,7 @@ export default function Heatmap({ days, today }: { days: Record<string, number>;
         <div className="mt-3 max-h-48 overflow-auto rounded-lg border border-sep">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card2 text-left text-xs text-label3"><tr><th className="px-3 py-2 font-medium">Day</th><th className="px-3 py-2 text-right font-medium">Activities</th></tr></thead>
-            <tbody>{active.length === 0 ? <tr><td className="px-3 py-3 text-label3" colSpan={2}>No activity yet.</td></tr> : active.map(([d, n]) => (
+            <tbody>{active.length === 0 ? <tr><td className="px-3 py-3 text-label3" colSpan={2}>No correct submissions yet.</td></tr> : active.map(([d, n]) => (
               <tr key={d} className="border-t border-sep"><td className="px-3 py-1.5">{fmt(d)}</td><td className="px-3 py-1.5 text-right tabular-nums">{n}</td></tr>
             ))}</tbody>
           </table>

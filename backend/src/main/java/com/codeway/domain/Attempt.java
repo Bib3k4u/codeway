@@ -17,7 +17,7 @@ public class Attempt {
     public int testsPassed;
     public int testsTotal;
     public Integer firstRunPassed;  // tests passed on first graded run
-    public Integer selfConfidence;  // 1..5
+    public Integer selfConfidence;  // legacy self-rating (no longer asked)
     public Long firstKeystrokeMs;
     public int churn;
     public Integer failedSubmissions;  // submissions that did not pass every test (nullable for existing rows)               // large delete-and-rewrite bursts
@@ -29,4 +29,10 @@ public class Attempt {
     @Column(columnDefinition = "text") public String hintsJson;        // hints already shown (list of objects)
     @Column(columnDefinition = "text") public String lastRunJson;      // last run/test output for the console
     public Instant lastActiveAt;
+    /** Redo of an earlier challenge from the learner's history: graded, but mastery is not changed. */
+    public Boolean practice;
+    @Column(columnDefinition = "text") public String revealedJson;     // indexes of hidden tests the learner revealed
+    @Column(columnDefinition = "text") public String lastTestsJson;    // last test results, unmasked (server only)
+
+    public boolean isPractice() { return Boolean.TRUE.equals(practice); }
 }

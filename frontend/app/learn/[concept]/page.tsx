@@ -101,7 +101,7 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
   const current = activeId || toc[0]?.id;
 
   return (
-    <AppShell wide
+    <AppShell wide icon={BookOpen}
       crumb={<span className="flex items-center gap-1.5"><Link href="/dashboard" className="navlink hover:text-label">{trackTitle ?? langLabel(lang)}</Link><ChevronRight size={13} className="text-label3" /><span className="font-medium text-label">{row?.title ?? lesson?.title ?? "Lesson"}</span></span>}
       actions={canPractice ? <Link href={practiceHref} className="btn btn-primary btn-sm max-sm:hidden">{cta}<ArrowRight size={14} /></Link> : undefined}
     >

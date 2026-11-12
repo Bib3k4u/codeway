@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { CalendarCheck, Flame, Menu, Trophy, X } from "lucide-react";
+import { CalendarCheck, Flame, Menu, Trophy, X, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { usePref } from "@/lib/prefs";
 import { useStats } from "@/lib/stats";
@@ -23,7 +23,7 @@ export function StatusChips({ compact = false }: { compact?: boolean }) {
       </span>
       {!compact && (
         <>
-          <span className="chip !h-7 !px-2.5 max-md:hidden" title="Actions today"><CalendarCheck size={14} /><span className="tabular-nums">{stats.activeToday}</span><span className="font-normal">today</span></span>
+          <span className="chip !h-7 !px-2.5 max-md:hidden" title="Correct submissions today"><CalendarCheck size={14} /><span className="tabular-nums">{stats.activeToday}</span><span className="font-normal">solved today</span></span>
           <span className="chip !h-7 !px-2.5 max-sm:hidden" title="Concepts mastered"><Trophy size={14} /><span className="tabular-nums">{stats.mastered}/{stats.conceptCount}</span><span className="font-normal">mastered</span></span>
         </>
       )}
@@ -35,8 +35,10 @@ export function StatusChips({ compact = false }: { compact?: boolean }) {
  * Standard pages: collapsible sidebar + sticky toolbar (breadcrumb left, status + actions right) + content.
  * `fluid` (workspace): no sidebar, a slim header, content fills the window.
  */
-export default function AppShell({ children, fluid = false, left, crumb, actions, wide = false }: {
+export default function AppShell({ children, fluid = false, left, crumb, icon: Icon, actions, wide = false }: {
   children: ReactNode; fluid?: boolean; left?: ReactNode; crumb?: ReactNode; actions?: ReactNode; wide?: boolean;
+  /** shown before the breadcrumb in the top bar, in the app's accent tile */
+  icon?: LucideIcon;
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -92,6 +94,7 @@ export default function AppShell({ children, fluid = false, left, crumb, actions
           <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <button className="btn btn-icon btn-ghost lg:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Menu size={18} /></button>
+              {Icon && <span aria-hidden className="grid h-7 w-7 shrink-0 place-items-center rounded-[9px]" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}><Icon size={15} strokeWidth={2.2} /></span>}
               <div className="min-w-0 truncate text-sm text-label2">{crumb}</div>
             </div>
             <div className="flex items-center gap-3"><StatusChips />{actions}<ThemeToggle compact /></div>

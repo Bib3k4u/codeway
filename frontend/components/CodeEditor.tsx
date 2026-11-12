@@ -4,8 +4,11 @@ import MonacoEditor, { type BeforeMount, type OnMount } from "@monaco-editor/rea
 import { useTheme } from "next-themes";
 import type { Diagnostic } from "@/lib/api";
 import { monacoLanguage } from "@/lib/lang";
+import { registerCompletions, setProjectFiles } from "@/lib/completion";
 
 const beforeMount: BeforeMount = (monaco) => {
+  // project-aware suggestions: classes, constructors and methods with tab-stop parameters, generics, library members
+  registerCompletions(monaco);
   // Monochrome code with yellow as the only colour, matching the app palette.
   monaco.editor.defineTheme("codeway-light", {
     base: "vs", inherit: true,
@@ -39,8 +42,10 @@ const beforeMount: BeforeMount = (monaco) => {
   });
 };
 
-export default function CodeEditor({ path, value, onChange, diagnostics }: {
+export default function CodeEditor({ path, value, onChange, diagnostics, files }: {
   path: string; value: string; onChange: (v: string) => void; diagnostics: Diagnostic[];
+  /** every file in the project, so suggestions know classes in files that aren't open */
+  files?: Record<string, string>;
 }) {
   const { resolvedTheme } = useTheme();
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
@@ -59,6 +64,7 @@ export default function CodeEditor({ path, value, onChange, diagnostics }: {
     }
   };
   useEffect(applyMarkers);
+  useEffect(() => { if (files) setProjectFiles(files); }, [files]);
 
   return (
     <MonacoEditor
@@ -73,6 +79,9 @@ export default function CodeEditor({ path, value, onChange, diagnostics }: {
         minimap: { enabled: false }, scrollBeyondLastLine: false, padding: { top: 14, bottom: 14 },
         automaticLayout: true, tabSize: 4, renderLineHighlight: "gutter", smoothScrolling: true,
         cursorSmoothCaretAnimation: "on", overviewRulerLanes: 0, fontLigatures: true, bracketPairColorization: { enabled: true },
+        // project suggestions first; tab stops in inserted calls; keep word suggestions as a fallback
+        suggest: { snippetsPreventQuickSuggestions: false, showWords: true, localityBonus: true, preview: true },
+        quickSuggestions: { other: true, comments: false, strings: false }, tabCompletion: "on", suggestSelection: "first",
       }}
     />
   );

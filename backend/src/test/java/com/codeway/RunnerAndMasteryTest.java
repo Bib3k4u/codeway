@@ -60,20 +60,44 @@ class RunnerAndMasteryTest {
         assertFalse(r.compiled());
     }
 
+    // Signals(passed, total, runs, compileErrors, hintLevel, minutes, expectedMinutes, firstTestRatio, failedSubmissions, reveals)
     @Test void performanceRules() {
-        double clean = MasteryService.performance(new Signals(5, 5, 2, 0, 0, 4, 10, 0, 3, 0));
-        double hinted = MasteryService.performance(new Signals(5, 5, 2, 0, 2, 4, 10, 0, 3, 0));
-        double solution = MasteryService.performance(new Signals(5, 5, 2, 0, 4, 4, 10, 0, 3, 0));
-        double failed = MasteryService.performance(new Signals(2, 5, 2, 0, 0, 4, 10, 0, 3, 0));
+        double clean = MasteryService.performance(new Signals(5, 5, 2, 0, 0, 4, 10, 1.0, 0, 0));
+        double hinted = MasteryService.performance(new Signals(5, 5, 2, 0, 2, 4, 10, 1.0, 0, 0));
+        double solution = MasteryService.performance(new Signals(5, 5, 2, 0, 4, 4, 10, 1.0, 0, 0));
+        double failed = MasteryService.performance(new Signals(2, 5, 2, 0, 0, 4, 10, 0.4, 0, 0));
+        double revealed = MasteryService.performance(new Signals(5, 5, 2, 0, 0, 4, 10, 0.6, 0, 2));
         assertEquals(1.0, clean, 1e-9);
         assertTrue(hinted < clean && solution <= 0.2 && failed < 0.3);
-        double resubmitted = MasteryService.performance(new Signals(5, 5, 2, 0, 0, 4, 10, 0, 3, 2));
-        assertEquals(0.8, resubmitted, 1e-9);
-        assertEquals("overconfident", MasteryService.calibration(5, 1, 5));
+        assertEquals(0.88, revealed, 1e-9);
+        assertEquals(0.8, MasteryService.performance(new Signals(5, 5, 2, 0, 0, 4, 10, 1.0, 2, 0)), 1e-9);
+        // normal trial and error is free: 6 runs and 3 compile errors still score a full 1.0
+        assertEquals(1.0, MasteryService.performance(new Signals(5, 5, 6, 3, 0, 11, 8, 0.4, 0, 0)), 1e-9);
         assertEquals(1, MasteryService.targetDifficulty(0.15));
         assertEquals(5, MasteryService.targetDifficulty(0.95));
         assertEquals("HEAVY", MasteryService.scaffolding(0.2));
         assertEquals("BLANK", MasteryService.scaffolding(0.8));
+    }
+
+    @Test void aFullPassNeverLowersTheScore() {
+        // the reported case: a learner above an easy challenge's level passes it with some struggle (was -0.03)
+        for (double before : new double[]{0.15, 0.45, 0.6, 0.9}) {
+            for (int difficulty = 1; difficulty <= 5; difficulty++) {
+                double expected = 1.0 / (1.0 + Math.exp(-8.0 * (before - (0.1 + (difficulty - 1) * 0.2))));
+                double perf = MasteryService.performance(new Signals(5, 5, 14, 9, 1, 30, 8, 0.2, 1, 1));
+                double after = MasteryService.nextScoreForTest(before, perf, expected, true);
+                assertTrue(after > before, "before=" + before + " d=" + difficulty + " after=" + after);
+            }
+        }
+        // a miss can lower it, by at most 0.10
+        assertEquals(0.5, MasteryService.nextScoreForTest(0.6, 0.0, 0.99, false), 1e-9);
+    }
+
+    @Test void fluencyReadsBehaviourNotSelfRating() {
+        double smooth = MasteryService.fluency(new Signals(5, 5, 2, 0, 0, 5, 10, 1.0, 0, 0));
+        double rough = MasteryService.fluency(new Signals(5, 5, 14, 6, 2, 30, 10, 0.0, 1, 1));
+        assertEquals("fluent", MasteryService.fluencyLabel(smooth));
+        assertEquals("effortful", MasteryService.fluencyLabel(rough));
     }
 
     @Test void learnerMistakesGetFriendlyMessages() {

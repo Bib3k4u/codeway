@@ -13,15 +13,18 @@ export interface MasteryView { score: number; streak: number; mastered: boolean;
 export interface Challenge {
   id: number; title: string; descriptionMd: string; difficulty: number; language?: string;
   scaffolding: "HEAVY" | "PARTIAL" | "BLANK"; expectedMinutes: number; files: Files;
-  testNames: string[]; sampleOutput: string;
+  testNames: string[]; sampleOutput: string; examples?: TestExample[];
 }
 export interface StartResp {
   attemptId: number; challenge: Challenge; mastery: MasteryView;
   resumed: boolean; draft?: Files; hints?: Hint[]; lastRun?: RunResp; startedAt?: string;
+  /** redo of a past challenge: graded, mastery unchanged */
+  practice?: boolean; revealed?: number[];
 }
 export interface HistoryRow { title: string; difficulty: number; passed: number; total: number; delta: number; hints: number; at: string }
 export interface Diagnostic { file: string; line: number; severity: string; message: string }
-export interface TestResult { name: string; passed: boolean; message: string }
+export interface TestResult { name: string; passed: boolean; message: string; hidden?: boolean; revealed?: boolean; index?: number }
+export interface TestExample { name: string; code: string }
 export interface RunResp {
   compiled: boolean; diagnostics: Diagnostic[]; stdout: string; stderr: string;
   tests: TestResult[]; timedOut: boolean; exitCode: number; millis: number; runs: number;
@@ -32,6 +35,18 @@ export interface SubmitResp extends RunResp {
   passed: number; total: number; allPassed: boolean; performance: number;
   scoreBefore: number; scoreAfter: number; delta: number; streak: number; streakGoal: number;
   mastered: boolean; cleanPass: boolean; calibration: string; feedback: string[]; minutes: number;
+  /** 0..1, read from how the learner worked; calibration holds its label (fluent / steady / effortful) */
+  fluency?: number; practice?: boolean;
+}
+export interface RevealResp { index: number; name: string; passed?: boolean; message?: string; reveals: number }
+export interface HistoryItem {
+  attemptId: number; challengeId: number; title: string; concept: string; conceptTitle: string; language: string;
+  difficulty: number; passed: number; total: number; delta: number; hints: number; practice: boolean; at: string;
+}
+export interface HistoryPage { items: HistoryItem[]; page: number; size: number; total: number; pages: number }
+export interface AttemptDetail {
+  attemptId: number; files: Files; passed: number; total: number; delta: number; practice: boolean; submittedAt: string | null;
+  challenge: { id: number; title: string; descriptionMd: string; language: string; concept: string; difficulty: number };
 }
 export interface Hint { level: number; maxLevel: number; kind: "nudge" | "concept" | "code" | "solution"; text: string; cost: string; files?: Files }
 

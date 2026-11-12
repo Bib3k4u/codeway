@@ -16,6 +16,7 @@ public class LearnController {
     public record SubmitReq(Map<String, String> files, Integer confidence, Boolean finish) {}
     public record HintReq(Map<String, String> files, String failures) {}
     public record DraftReq(Map<String, String> files) {}
+    public record RevealReq(Integer index) {}
     public record TelemetryReq(List<AttemptService.Event> events) {}
 
     private final ConceptCatalog catalog;
@@ -92,6 +93,30 @@ public class LearnController {
     @PostMapping("/attempts/{id}/hint")
     public Map<String, Object> hint(HttpServletRequest req, @PathVariable Long id, @RequestBody HintReq b) {
         return attempts.hint(uid(req), id, b.files(), b.failures());
+    }
+
+    /** Reveal one hidden test of an open attempt (costs a little mastery). */
+    @PostMapping("/attempts/{id}/reveal")
+    public Map<String, Object> reveal(HttpServletRequest req, @PathVariable Long id, @RequestBody RevealReq b) {
+        return attempts.reveal(uid(req), id, b.index() == null ? -1 : b.index());
+    }
+
+    /** Full submission history, newest first, paginated. */
+    @GetMapping("/history")
+    public Map<String, Object> historyPage(HttpServletRequest req, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return attempts.historyPage(uid(req), page, size);
+    }
+
+    /** One past submission with its code. */
+    @GetMapping("/attempts/{id}")
+    public Map<String, Object> attempt(HttpServletRequest req, @PathVariable Long id) {
+        return attempts.attemptDetail(uid(req), id);
+    }
+
+    /** Redo a past challenge as practice (graded, mastery unchanged). */
+    @PostMapping("/challenges/{id}/redo")
+    public Map<String, Object> redo(HttpServletRequest req, @PathVariable Long id) {
+        return attempts.redo(uid(req), id);
     }
 
     @PutMapping("/attempts/{id}/draft")

@@ -82,6 +82,123 @@ public class ChallengeService {
         return null;
     }
 
+    // ---- the same exercise in another language ----
+    /** The family a challenge belongs to: itself, or the challenge it was translated from. */
+    public static long family(Challenge ch) { return ch.familyId != null ? ch.familyId : ch.id; }
+
+    /** This exercise in {@code language}: an existing translation, or a new validated one. Null if neither works. */
+    public Challenge inLanguage(Challenge src, String language) {
+        if (src.language.equals(language)) return src;
+        long fam = family(src);
+        var existing = challenges.findByLanguageAndConceptAndFamilyIdAndValidatedTrue(language, src.concept, fam);
+        if (!existing.isEmpty()) return existing.get(0);
+        // an original in the target language whose family is this one cannot exist; the only other match is the root
+        var root = challenges.findById(fam).filter(c -> c.language.equals(language) && c.validated);
+        if (root.isPresent()) return root.get();
+        if (!ai.isConfigured()) return null;
+        Lang lang = Lang.of(language);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                String raw = ai.chat(ai.model(), system(lang), translatePrompt(src, lang), true);
+                Challenge ch = parse(raw, language, src.concept, src.difficulty, src.scaffolding);
+                ch.expectedMinutes = src.expectedMinutes;
+                String problem = validate(ch);
+                if (problem == null) {
+                    ch.validated = true; ch.origin = "ai-translation"; ch.familyId = fam;
+                    return challenges.save(ch);
+                }
+                System.err.println("[challenge] translation " + attempt + " rejected: " + problem);
+            } catch (Exception e) {
+                System.err.println("[challenge] translation " + attempt + " failed: " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private static String translatePrompt(Challenge src, Lang lang) {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("title", src.title);
+        source.put("descriptionMd", src.descriptionMd);
+        source.put("starterFiles", Json.files(src.starterFilesJson));
+        source.put("referenceSolution", Json.files(src.referenceSolutionJson));
+        source.put("tests", Json.files(src.testsJson));
+        source.put("hints", Json.strings(src.hintsJson));
+        return """
+                Translate this %1$s exercise into %2$s. It must be the SAME exercise: same title, same story, same classes and
+                behaviour, same requirements, same test cases in the same order with the same names, and the same scaffolding
+                (TODO gaps in the same places). Only adapt naming and idioms to %2$s (e.g. snake_case methods in Python),
+                and rewrite every signature in descriptionMd for %2$s.
+
+                Source exercise (JSON):
+                %3$s
+
+                Return JSON with exactly these keys: title, descriptionMd, expectedMinutes, starterFiles, referenceSolution, tests, hints.
+                Rules for %2$s:
+                %4$s
+                - Include %5$s in starterFiles and referenceSolution; tests is a single file %6$s.
+                - The starter must NOT pass the tests; the reference solution must pass all of them.
+                - descriptionMd keeps the same sections; its Example block must be exactly what the reference %5$s prints.
+                """.formatted(Lang.of(src.language).label, lang.label, Json.write(source), langRules(lang), lang.mainFile, lang.testFile);
+    }
+
+    /** Index just past the statement starting at {@code start}: where its parentheses balance again. */
+    static int statementEnd(String[] lines, int start) {
+        int depth = 0; boolean opened = false;
+        for (int i = start; i < lines.length; i++) {
+            boolean inStr = false; char q = 0;
+            String l = lines[i];
+            for (int j = 0; j < l.length(); j++) {
+                char c = l.charAt(j);
+                if (inStr) { if (c == '\\') j++; else if (c == q) inStr = false; continue; }
+                if (c == '"' || c == '\'' || c == '`') { inStr = true; q = c; }
+                else if (c == '(') { depth++; opened = true; }
+                else if (c == ')') depth--;
+            }
+            if (opened && depth <= 0) return i + 1;
+        }
+        return Math.min(lines.length, start + 1);
+    }
+
+    // ---- visible examples vs hidden tests ----
+    /** How many tests (the first ones) are shown as worked examples; the rest stay hidden until revealed. */
+    public static int visibleCount(int total) { return total <= 1 ? total : Math.max(1, Math.min(3, total / 2)); }
+
+    /**
+     * Source snippets of the visible tests, so learners can read what is checked. For Java, JavaScript and C++ a test
+     * is its run(...) call and the lambda after it; in Python a test may use a helper def written above the call.
+     */
+    public static List<Map<String, String>> examples(Challenge ch) {
+        List<String> names = testNames(ch);
+        int n = visibleCount(names.size());
+        Lang lang = Lang.of(ch.language);
+        String src = Json.files(ch.testsJson).getOrDefault(lang.testFile, "");
+        String[] lines = src.split("\n", -1);
+        List<Integer> calls = new ArrayList<>();
+        for (int i = 0; i < lines.length; i++) if (lines[i].contains(lang.testCall)) calls.add(i);
+        List<Map<String, String>> out = new ArrayList<>();
+        for (int k = 0; k < n && k < names.size(); k++) {
+            String name = names.get(k);
+            int at = -1;
+            for (int c : calls) if (lines[c].contains(name)) { at = c; break; }
+            String code = "";
+            if (at >= 0) {
+                int idx = calls.indexOf(at);
+                int from = at, to;
+                if (lang == Lang.PYTHON) {
+                    // a helper def written just above the call belongs to this test
+                    from = idx > 0 ? calls.get(idx - 1) + 1 : at;
+                    while (from < at && (lines[from].isBlank() || lines[from].startsWith("import") || lines[from].startsWith("from "))) from++;
+                }
+                to = statementEnd(lines, at);
+                List<String> block = new ArrayList<>(Arrays.asList(lines).subList(from, Math.min(to, from + 16)));
+                if (to - from > 16) block.add("    ...");
+                code = String.join("\n", block).stripIndent().strip();
+            }
+            out.add(Map.of("name", name, "code", code));
+        }
+        return out;
+    }
+
     /** Returns null when the challenge is sound, otherwise the reason it was rejected. */
     public String validate(Challenge ch) {
         Map<String, String> tests = Json.files(ch.testsJson);
@@ -304,6 +421,9 @@ public class ChallengeService {
                   "## %6$s" (exactly what the demo should create and print), "## Example" (a fenced block with the exact output the reference %6$s prints),
                   "## Tips" (1-2 gentle reminders, no solution code).
                 - The Example output in descriptionMd must be exactly what referenceSolution's %6$s prints.
+                - Directly under the Example block add a short "Format:" bullet list that removes all guesswork about printing:
+                  one item per printed line pattern, saying exactly what goes on each line, separators (e.g. ": " with one space),
+                  number formatting (e.g. 2 decimal places), capitalisation, and that each item is on its own line.
                 """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang));
     }
 }

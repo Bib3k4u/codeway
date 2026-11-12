@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FloatingTip, { type Tip } from "./FloatingTip";
-import { BookOpen, Check, ChevronRight, LayoutGrid, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { BookOpen, Check, ChevronRight, LayoutGrid, UserRound, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ConceptRow, Track } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useConcepts } from "@/lib/concepts";
@@ -100,6 +100,9 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
         <Link href="/dashboard" onClick={onNavigate} className="navitem" aria-current={pathname === "/dashboard" ? "page" : undefined} aria-label="Dashboard" {...tip("Dashboard")}>
           <LayoutGrid size={17} className="navicon" />{!collapsed && "Dashboard"}
         </Link>
+        <Link href="/profile" onClick={onNavigate} className={`navitem ${collapsed ? "mt-1" : ""}`} aria-current={pathname === "/profile" ? "page" : undefined} aria-label="Profile and history" {...tip("Profile & history")}>
+          <UserRound size={17} className="navicon" />{!collapsed && "Profile & history"}
+        </Link>
 
         {collapsed ? (
           <>
@@ -171,10 +174,10 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
             ? <img src={user.avatarUrl} alt="" aria-hidden width={32} height={32} referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-full object-cover" />
             : <span aria-hidden className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-bold" style={{ background: "var(--accent-fill)", color: "var(--accent-ink)" }}>{initial}</span>}
           {!collapsed && (
-            <div className="min-w-0 flex-1">
+            <Link href="/profile" onClick={onNavigate} className="min-w-0 flex-1 rounded-md hover:text-label" title="Profile and history">
               <p className="truncate text-[13px] font-semibold leading-tight">{user?.displayName}</p>
               <p className="truncate text-xs text-label3">{user?.email}</p>
-            </div>
+            </Link>
           )}
           <button className="btn btn-sm btn-icon btn-ghost" aria-label="Sign out" {...tip("Sign out")} title={collapsed ? undefined : "Sign out"} onClick={() => { signOut(); router.replace("/"); }}><LogOut size={15} /></button>
         </div>

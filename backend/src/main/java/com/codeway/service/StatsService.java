@@ -32,18 +32,15 @@ public class StatsService {
         Map<LocalDate, Integer> perDay = new TreeMap<>();
         int solved = 0, submissions = 0, runs = 0, hints = 0;
         double minutesCoding = 0;
+        // The calendar and streaks count correct submissions (every test passed) per day.
         for (Attempt a : mine) {
-            bump(perDay, a.startedAt, zone);
             runs += a.runs; hints += a.hintsUsed;
             if (a.submittedAt != null) {
-                bump(perDay, a.submittedAt, zone);
                 submissions++;
-                if (a.testsTotal > 0 && a.testsPassed == a.testsTotal) solved++;
+                if (a.testsTotal > 0 && a.testsPassed == a.testsTotal) { solved++; bump(perDay, a.submittedAt, zone); }
                 minutesCoding += Math.max(0, Duration.between(a.startedAt, a.submittedAt).toSeconds() / 60.0);
             }
         }
-        List<Long> ids = mine.stream().map(a -> a.id).toList();
-        if (!ids.isEmpty()) for (EventLog e : events.findByAttemptIdInAndTypeIn(ids, List.of("run", "hint"))) bump(perDay, e.ts, zone);
 
         // streaks
         int current = 0;
