@@ -114,11 +114,13 @@ public class AttemptService {
             out.put("hints", Json.list(a.hintsJson));
             Object last = Json.any(a.lastRunJson);
             if (last != null) out.put("lastRun", last);
-            out.put("startedAt", a.startedAt.toString());
         }
         out.put("mastery", masteryView(m));
         out.put("practice", a.isPractice());
         out.put("revealed", revealed(a));
+        out.put("startedAt", a.startedAt.toString());
+        out.put("serverNow", Instant.now().toString());
+        out.putAll(timeRecord(a.userId, ch.id, a.id));
         return out;
     }
 
@@ -222,7 +224,9 @@ public class AttemptService {
         a.failedSubmissions = failedBefore;
         a.finalFilesJson = Json.write(files);
 
-        double minutes = Duration.between(a.startedAt, a.submittedAt).toSeconds() / 60.0;
+        long seconds = Math.max(0, Duration.between(a.startedAt, a.submittedAt).toSeconds());
+        a.elapsedSeconds = (int) Math.min(Integer.MAX_VALUE, seconds);
+        double minutes = seconds / 60.0;
         Double firstRatio = a.firstRunPassed == null || total == 0 ? null : Math.min(1.0, (double) a.firstRunPassed / total);
         var signals = new MasteryService.Signals(passed, total, a.runs, a.compileErrors, a.hintsUsed, minutes, ch.expectedMinutes,
                 firstRatio, failedBefore, revealed(a).size());
@@ -250,7 +254,50 @@ public class AttemptService {
         out.put("calibration", o.fluencyLabel());
         out.put("feedback", feedback(signals, o, passed, total, a.isPractice()));
         out.put("minutes", round(minutes));
+        out.put("seconds", a.elapsedSeconds);
+        out.putAll(timeRecord(userId, ch.id, null));
         return out;
+    }
+
+    // ---- clock ----
+    /** Restart the clock on an open attempt (e.g. when revisiting a question to time a fresh try). */
+    public Map<String, Object> resetTimer(Long userId, Long attemptId) {
+        Attempt a = owned(userId, attemptId);
+        if (a.submittedAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt is already submitted");
+        a.startedAt = Instant.now();
+        a.lastActiveAt = a.startedAt;
+        a.timerResets = (a.timerResets == null ? 0 : a.timerResets) + 1;
+        attempts.save(a);
+        logEvent(a.id, "timer_reset", "{}");
+        return Map.of("startedAt", a.startedAt.toString(), "serverNow", Instant.now().toString());
+    }
+
+    /**
+     * This learner's record on a challenge: which attempt this is, how many there were, the best (fastest) solved
+     * time and the longest time spent on a submission so far.
+     */
+    Map<String, Object> timeRecord(Long userId, Long challengeId, Long currentOpenId) {
+        List<Attempt> mine = attempts.findByUserId(userId).stream().filter(x -> challengeId.equals(x.challengeId)).toList();
+        Integer best = null, longest = null;
+        for (Attempt x : mine) {
+            Integer secs = seconds(x);
+            if (secs == null) continue;
+            if (x.testsTotal > 0 && x.testsPassed == x.testsTotal) best = best == null ? secs : Math.min(best, secs);
+            longest = longest == null ? secs : Math.max(longest, secs);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("attemptNumber", mine.size());
+        out.put("submittedAttempts", (int) mine.stream().filter(x -> x.submittedAt != null).count());
+        out.put("bestSeconds", best);
+        out.put("longestSeconds", longest);
+        return out;
+    }
+
+    /** Time spent on a submitted attempt (older rows predate elapsedSeconds). */
+    static Integer seconds(Attempt x) {
+        if (x.submittedAt == null) return null;
+        if (x.elapsedSeconds != null) return x.elapsedSeconds;
+        return (int) Math.max(0, Duration.between(x.startedAt, x.submittedAt).toSeconds());
     }
 
     // ---- hints ----
@@ -438,27 +485,129 @@ public class AttemptService {
     }
 
     // ---- history ----
-    /** All submitted attempts, newest first, 20 per page by default. */
-    public Map<String, Object> historyPage(Long userId, int page, int size) {
-        var p = attempts.findByUserIdAndSubmittedAtIsNotNull(userId,
-                org.springframework.data.domain.PageRequest.of(Math.max(0, page), Math.max(1, Math.min(50, size)),
-                        org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "submittedAt")));
-        List<Map<String, Object>> items = new ArrayList<>();
-        for (Attempt a : p.getContent()) {
-            Challenge ch = challenges.findById(a.challengeId).orElse(null);
+    public record HistoryFilter(String language, String concept, String track, String result, Integer days, Long challengeId) {}
+
+    /** Submitted attempts, newest first, filtered (language, topic, track, result, last N days, one challenge), paginated. */
+    public Map<String, Object> historyPage(Long userId, int page, int size, HistoryFilter f) {
+        List<Map<String, Object>> all = historyRows(userId, f);
+        int sz = Math.max(1, Math.min(50, size)), pg = Math.max(0, page);
+        int from = Math.min(all.size(), pg * sz), to = Math.min(all.size(), from + sz);
+        int pages = (all.size() + sz - 1) / sz;
+        return Map.of("items", all.subList(from, to), "page", pg, "size", sz, "total", all.size(), "pages", pages);
+    }
+
+    private List<Map<String, Object>> historyRows(Long userId, HistoryFilter f) {
+        List<Attempt> mine = attempts.findByUserIdAndSubmittedAtIsNotNullOrderBySubmittedAtDesc(userId);
+        Map<Long, Challenge> chs = new HashMap<>();
+        for (Attempt a : mine) chs.computeIfAbsent(a.challengeId, id -> challenges.findById(id).orElse(null));
+        // attempt numbers count every submission of a challenge in time order
+        Map<Long, Integer> seen = new HashMap<>();
+        Map<Long, Integer> number = new HashMap<>();
+        List<Attempt> oldestFirst = new ArrayList<>(mine);
+        Collections.reverse(oldestFirst);
+        for (Attempt a : oldestFirst) number.put(a.id, seen.merge(a.challengeId, 1, Integer::sum));
+        Instant since = f != null && f.days() != null && f.days() > 0 ? Instant.now().minus(Duration.ofDays(f.days())) : null;
+
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Attempt a : mine) {
+            Challenge ch = chs.get(a.challengeId);
             if (ch == null) continue;
+            var info = catalog.find(ch.language, ch.concept);
+            boolean passed = a.testsTotal > 0 && a.testsPassed == a.testsTotal;
+            if (f != null) {
+                if (f.language() != null && !f.language().isBlank() && !f.language().equals(ch.language)) continue;
+                if (f.concept() != null && !f.concept().isBlank() && !f.concept().equals(ch.concept)) continue;
+                if (f.track() != null && !f.track().isBlank() && !info.map(c -> c.track().equals(f.track())).orElse(false)) continue;
+                if ("passed".equals(f.result()) && !passed) continue;
+                if ("failed".equals(f.result()) && passed) continue;
+                if ("practice".equals(f.result()) && !a.isPractice()) continue;
+                if (since != null && a.submittedAt.isBefore(since)) continue;
+                if (f.challengeId() != null && !f.challengeId().equals(ch.id)) continue;
+            }
             Map<String, Object> r = new LinkedHashMap<>();
             r.put("attemptId", a.id); r.put("challengeId", ch.id); r.put("title", ch.title);
             r.put("concept", ch.concept);
-            r.put("conceptTitle", catalog.find(ch.language, ch.concept).map(ConceptCatalog.Concept::title).orElse(ch.concept));
+            r.put("conceptTitle", info.map(ConceptCatalog.Concept::title).orElse(ch.concept));
+            r.put("track", info.map(ConceptCatalog.Concept::track).orElse(""));
             r.put("language", ch.language); r.put("difficulty", ch.difficulty);
             r.put("passed", a.testsPassed); r.put("total", a.testsTotal);
             r.put("delta", round(a.scoreAfter - a.scoreBefore)); r.put("hints", a.hintsUsed);
             r.put("practice", a.isPractice());
+            r.put("seconds", seconds(a));
+            r.put("attemptNumber", number.getOrDefault(a.id, 1));
             r.put("at", a.submittedAt.toString());
-            items.add(r);
+            out.add(r);
         }
-        return Map.of("items", items, "page", p.getNumber(), "size", p.getSize(), "total", p.getTotalElements(), "pages", p.getTotalPages());
+        return out;
+    }
+
+    /** History grouped by challenge: every attempt, best time and best result per challenge. */
+    public List<Map<String, Object>> historyByChallenge(Long userId, HistoryFilter f) {
+        Map<Long, Map<String, Object>> groups = new LinkedHashMap<>();
+        for (Map<String, Object> r : historyRows(userId, f)) {
+            Map<String, Object> g = groups.computeIfAbsent((Long) r.get("challengeId"), id -> {
+                Map<String, Object> n = new LinkedHashMap<>();
+                for (String k : List.of("challengeId", "title", "concept", "conceptTitle", "track", "language", "difficulty")) n.put(k, r.get(k));
+                n.put("attempts", new ArrayList<Map<String, Object>>());
+                n.put("solved", 0); n.put("bestSeconds", null); n.put("lastAt", r.get("at"));
+                return n;
+            });
+            @SuppressWarnings("unchecked") var list = (List<Map<String, Object>>) g.get("attempts");
+            list.add(r);
+            boolean ok = (int) r.get("total") > 0 && r.get("passed").equals(r.get("total"));
+            if (ok) {
+                g.put("solved", (int) g.get("solved") + 1);
+                Integer secs = (Integer) r.get("seconds"), best = (Integer) g.get("bestSeconds");
+                if (secs != null && (best == null || secs < best)) g.put("bestSeconds", secs);
+            }
+        }
+        return new ArrayList<>(groups.values());
+    }
+
+    /** Totals and a per-day series for the profile charts, plus breakdowns by topic and language. */
+    public Map<String, Object> historySummary(Long userId, int days, int tzOffsetMinutes) {
+        int minutesTz = Math.max(-14 * 60, Math.min(14 * 60, tzOffsetMinutes));
+        java.time.ZoneOffset zone = java.time.ZoneOffset.ofTotalSeconds(-minutesTz * 60);
+        java.time.LocalDate today = java.time.LocalDate.now(zone);
+        int n = Math.max(7, Math.min(365, days));
+        Map<java.time.LocalDate, int[]> perDay = new TreeMap<>(); // [seconds, solved, submitted]
+        for (int i = n - 1; i >= 0; i--) perDay.put(today.minusDays(i), new int[3]);
+        Map<String, Map<String, Object>> byConcept = new LinkedHashMap<>();
+        Map<String, int[]> byLanguage = new LinkedHashMap<>();
+        int attemptsCount = 0, solved = 0; long totalSeconds = 0; Set<Long> challengesSeen = new HashSet<>();
+        for (Map<String, Object> r : historyRows(userId, null)) {
+            attemptsCount++;
+            boolean ok = (int) r.get("total") > 0 && r.get("passed").equals(r.get("total"));
+            if (ok) solved++;
+            Integer secs = (Integer) r.get("seconds");
+            if (secs != null) totalSeconds += secs;
+            challengesSeen.add((Long) r.get("challengeId"));
+            var day = java.time.LocalDate.ofInstant(Instant.parse((String) r.get("at")), zone);
+            int[] d = perDay.get(day);
+            if (d != null) { d[0] += secs == null ? 0 : secs; d[1] += ok ? 1 : 0; d[2]++; }
+            var c = byConcept.computeIfAbsent((String) r.get("concept"), k -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("concept", k); m.put("conceptTitle", r.get("conceptTitle")); m.put("track", r.get("track"));
+                m.put("attempts", 0); m.put("solved", 0); m.put("seconds", 0L);
+                return m;
+            });
+            c.put("attempts", (int) c.get("attempts") + 1);
+            if (ok) c.put("solved", (int) c.get("solved") + 1);
+            c.put("seconds", (long) c.get("seconds") + (secs == null ? 0 : secs));
+            int[] l = byLanguage.computeIfAbsent((String) r.get("language"), k -> new int[2]);
+            l[0]++; if (ok) l[1]++;
+        }
+        List<Map<String, Object>> series = new ArrayList<>();
+        perDay.forEach((d, v) -> series.add(Map.of("date", d.toString(), "minutes", round(v[0] / 60.0), "solved", v[1], "submitted", v[2])));
+        List<Map<String, Object>> langs = new ArrayList<>();
+        byLanguage.forEach((k, v) -> langs.add(Map.of("language", k, "attempts", v[0], "solved", v[1])));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("days", series);
+        out.put("byConcept", new ArrayList<>(byConcept.values()));
+        out.put("byLanguage", langs);
+        out.put("totals", Map.of("attempts", attemptsCount, "solved", solved, "challenges", challengesSeen.size(),
+                "minutes", round(totalSeconds / 60.0), "avgMinutes", attemptsCount == 0 ? 0 : round(totalSeconds / 60.0 / attemptsCount)));
+        return out;
     }
 
     /** One submitted attempt: the challenge and the code that was submitted. */

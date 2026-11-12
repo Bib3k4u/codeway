@@ -29,6 +29,19 @@ public class AuthController {
     }
 
     public record VisitReq(String language) {}
+    public record ProfileReq(String displayName) {}
+
+    /** Change what the learner is called (1-40 characters). */
+    @PatchMapping("/auth/me")
+    public Map<String, Object> updateMe(HttpServletRequest req, @RequestBody ProfileReq b) {
+        Long id = (Long) req.getAttribute(AuthInterceptor.ATTR);
+        User u = users.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+        String name = b.displayName() == null ? "" : b.displayName().strip().replaceAll("\\s+", " ");
+        if (name.isEmpty() || name.length() > 40) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Use 1 to 40 characters for your name.");
+        u.displayName = name;
+        users.save(u);
+        return me(req);
+    }
 
     /** Counts lesson/editor visits per language; the most visited one is preselected next time. */
     @PostMapping("/prefs/visit")

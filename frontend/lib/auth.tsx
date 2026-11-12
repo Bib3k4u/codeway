@@ -12,6 +12,8 @@ interface AuthCtx {
   signOut: () => Promise<void>;
   /** The learner picked another language: remember it (server and here) so every page follows. */
   setLanguage: (language: LangId) => void;
+  /** Change what the learner is called; throws with the server's message if it's not allowed. */
+  setDisplayName: (name: string) => Promise<void>;
 }
 const Ctx = createContext<AuthCtx | null>(null);
 
@@ -57,7 +59,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((u) => (u && u.preferredLanguage !== language ? { ...u, preferredLanguage: language } : u));
   }, []);
 
-  const value = useMemo(() => ({ user, loading, signInWithGitHub, signOut, setLanguage }), [user, loading, signInWithGitHub, signOut, setLanguage]);
+  const setDisplayName = useCallback(async (name: string) => {
+    const me = await api<User>("/auth/me", { displayName: name }, "PATCH");
+    setUser((u) => (u ? { ...u, displayName: me.displayName } : u));
+  }, []);
+
+  const value = useMemo(() => ({ user, loading, signInWithGitHub, signOut, setLanguage, setDisplayName }), [user, loading, signInWithGitHub, signOut, setLanguage, setDisplayName]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

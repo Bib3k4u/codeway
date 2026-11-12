@@ -31,6 +31,10 @@ public class Attempt {
     public Instant lastActiveAt;
     /** Redo of an earlier challenge from the learner's history: graded, but mastery is not changed. */
     public Boolean practice;
+    /** Time on the clock when the attempt was submitted (start shifts forward over breaks between sessions). */
+    public Integer elapsedSeconds;
+    /** How often the learner restarted the clock on this attempt. */
+    public Integer timerResets;
     @Column(columnDefinition = "text") public String revealedJson;     // indexes of hidden tests the learner revealed
     @Column(columnDefinition = "text") public String lastTestsJson;    // last test results, unmasked (server only)
 

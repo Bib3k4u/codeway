@@ -101,10 +101,33 @@ public class LearnController {
         return attempts.reveal(uid(req), id, b.index() == null ? -1 : b.index());
     }
 
-    /** Full submission history, newest first, paginated. */
+    /** Submission history, newest first, paginated, with optional filters. */
     @GetMapping("/history")
-    public Map<String, Object> historyPage(HttpServletRequest req, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        return attempts.historyPage(uid(req), page, size);
+    public Map<String, Object> historyPage(HttpServletRequest req, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+                                           @RequestParam(required = false) String language, @RequestParam(required = false) String concept,
+                                           @RequestParam(required = false) String track, @RequestParam(required = false) String result,
+                                           @RequestParam(required = false) Integer days, @RequestParam(required = false) Long challenge) {
+        return attempts.historyPage(uid(req), page, size, new AttemptService.HistoryFilter(language, concept, track, result, days, challenge));
+    }
+
+    /** History grouped by challenge (every attempt, best time). */
+    @GetMapping("/history/challenges")
+    public List<Map<String, Object>> historyByChallenge(HttpServletRequest req, @RequestParam(required = false) String language,
+                                                       @RequestParam(required = false) String concept, @RequestParam(required = false) String track,
+                                                       @RequestParam(required = false) String result, @RequestParam(required = false) Integer days) {
+        return attempts.historyByChallenge(uid(req), new AttemptService.HistoryFilter(language, concept, track, result, days, null));
+    }
+
+    /** Per-day series and breakdowns for the profile charts. */
+    @GetMapping("/history/summary")
+    public Map<String, Object> historySummary(HttpServletRequest req, @RequestParam(defaultValue = "90") int days, @RequestParam(defaultValue = "0") int tz) {
+        return attempts.historySummary(uid(req), days, tz);
+    }
+
+    /** Restart the clock on an open attempt. */
+    @PostMapping("/attempts/{id}/timer/reset")
+    public Map<String, Object> resetTimer(HttpServletRequest req, @PathVariable Long id) {
+        return attempts.resetTimer(uid(req), id);
     }
 
     /** One past submission with its code. */

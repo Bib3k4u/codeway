@@ -8,6 +8,7 @@ import { usePref } from "@/lib/prefs";
 import { useStats } from "@/lib/stats";
 import Sidebar, { Logo } from "./Sidebar";
 import ThemeToggle from "./ThemeToggle";
+import StreakCelebration from "./StreakCelebration";
 
 export { Logo };
 
@@ -35,10 +36,12 @@ export function StatusChips({ compact = false }: { compact?: boolean }) {
  * Standard pages: collapsible sidebar + sticky toolbar (breadcrumb left, status + actions right) + content.
  * `fluid` (workspace): no sidebar, a slim header, content fills the window.
  */
-export default function AppShell({ children, fluid = false, left, crumb, icon: Icon, actions, wide = false }: {
+export default function AppShell({ children, fluid = false, left, crumb, icon: Icon, actions, wide = false, quiet = false }: {
   children: ReactNode; fluid?: boolean; left?: ReactNode; crumb?: ReactNode; actions?: ReactNode; wide?: boolean;
   /** shown before the breadcrumb in the top bar, in the app's accent tile */
   icon?: LucideIcon;
+  /** hold streak popups while the page shows its own overlay (e.g. a submission result) */
+  quiet?: boolean;
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -69,6 +72,7 @@ export default function AppShell({ children, fluid = false, left, crumb, icon: I
           </div>
         </header>
         <main className="min-h-0 flex-1">{children}</main>
+        <StreakCelebration paused={quiet} />
       </div>
     );
   }
@@ -102,6 +106,7 @@ export default function AppShell({ children, fluid = false, left, crumb, icon: I
         </header>
         <main className={`mx-auto w-full px-4 pb-16 pt-8 sm:px-8 ${wide ? "max-w-[1440px]" : "max-w-6xl"}`}>{children}</main>
       </div>
+      <StreakCelebration paused={quiet} />
     </div>
   );
 }

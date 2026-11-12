@@ -19,6 +19,8 @@ import { usePref } from "@/lib/prefs";
 import { api, saveDraftOnExit, type Files, type Hint, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel from "@/components/practice/TestPanel";
+import ChallengeClock from "@/components/practice/ChallengeClock";
+import { duration } from "@/lib/time";
 
 type Busy = null | "main" | "tests" | "submit" | "hint";
 const hintNames = ["Nudge", "Concept", "Partial code", "Solution"];
@@ -271,6 +273,13 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
     setTestRun(patch); setRun(patch); setRetry((x) => (x ? (patch(x) as SubmitResp) : x));
   }
 
+  /** Restart the clock on this attempt (a fresh timed try at the same question). */
+  async function resetClock() {
+    if (!attemptId) return;
+    const r = await api<{ startedAt: string; serverNow: string }>(`/attempts/${attemptId}/timer/reset`, {});
+    setStart((s) => (s ? { ...s, startedAt: r.startedAt, serverNow: r.serverNow } : s));
+  }
+
   /** Learners can delete files they created; starter files can only be reset. */
   function deleteFile(name: string) {
     if (name in (start?.challenge.files ?? {})) return;
@@ -288,7 +297,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
 
   const endParty = useCallback(() => setParty(false), []);
   const diagnostics = run?.diagnostics ?? [];
-  const nextChallenge = () => { setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setStart(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setStart(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
   const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -333,7 +342,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   );
 
   return (
-    <AppShell fluid left={crumb}>
+    <AppShell fluid left={crumb} quiet={sheet !== null || party}>
       <div ref={wsRef} className={focus ? "fixed inset-0 z-[55] flex bg-card max-lg:flex-col" : "flex h-full min-h-0 bg-card max-lg:h-auto max-lg:flex-col max-lg:overflow-auto"}>
         {/* ---------- Left: brief & hints ---------- */}
         {showDesc && (<>
@@ -428,6 +437,10 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                 ))}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {start.startedAt && (
+                  <ChallengeClock key={start.startedAt} startedAt={start.startedAt} serverNow={start.serverNow} stopped={sheet === "result"}
+                    attemptNumber={start.attemptNumber} bestSeconds={start.bestSeconds} longestSeconds={start.longestSeconds} onReset={resetClock} />
+                )}
                 <ResetMenu fileName={active} fileHasTemplate={fileHasTemplate} fileChanged={fileChanged} anyChanged={anyChanged}
                   onResetFile={() => setConfirmReset("file")} onResetAll={() => setConfirmReset("all")} disabled={busy !== null} />
                 <button className="btn btn-secondary btn-sm" onClick={() => exec("main")} disabled={busy !== null} title="Run (⌘↵)">
@@ -564,7 +577,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       {sheet === "retry" && retry && <FixSheet r={retry} busy={busy === "submit"} onFix={() => setSheet(null)} onMoveOn={() => submit(true)} onReveal={reveal} />}
 
       {/* ---------- Result sheet ---------- */}
-      {party && <Confetti running={sheet === "result"} onDone={endParty} />}
+      {party && sheet === "result" && <Confetti running onDone={endParty} />}
       {sheet === "result" && result && <ResultSheet r={result} concept={concept} lang={lang} onNext={nextChallenge} onHome={() => router.push("/dashboard")} />}
     </AppShell>
   );
@@ -665,8 +678,17 @@ function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; conc
         <div className="mb-6 flex flex-col items-center text-center">
           {r.mastered ? <Trophy className="mb-3 text-ok" size={34} /> : r.allPassed ? <Check className="mb-3 rounded-full bg-oksoft p-1.5 text-ok" size={34} /> : <XCircle className="mb-3 text-warn" size={34} />}
           <h2 className="display text-[44px]">{r.mastered ? "Concept mastered" : r.allPassed ? "Nicely done" : "Not quite yet"}</h2>
-          <p className="mt-1 text-sm text-label2">{r.passed} of {r.total} tests passed · {r.minutes < 1 ? `${Math.max(1, Math.round(r.minutes * 60))} sec` : `${Math.round(r.minutes)} min`}</p>
+          <p className="mt-1 text-sm text-label2">{r.passed} of {r.total} tests passed{r.attemptNumber ? ` · attempt #${r.attemptNumber}` : ""}</p>
         </div>
+        <div className="mb-5 grid grid-cols-3 divide-x divide-[var(--sep)] rounded-xl border border-sep bg-card2 text-center">
+          <div className="p-3"><p className="text-[11.5px] uppercase tracking-wider text-label3">This time</p><p className="mt-0.5 text-[17px] font-semibold tabular-nums">{duration(r.seconds ?? r.minutes * 60)}</p></div>
+          <div className="p-3"><p className="text-[11.5px] uppercase tracking-wider text-label3">Best solved</p>
+            <p className={`mt-0.5 text-[17px] font-semibold tabular-nums ${r.allPassed && r.bestSeconds != null && r.seconds === r.bestSeconds ? "text-ok" : ""}`}>{duration(r.bestSeconds)}</p></div>
+          <div className="p-3"><p className="text-[11.5px] uppercase tracking-wider text-label3">Longest</p><p className="mt-0.5 text-[17px] font-semibold tabular-nums">{duration(r.longestSeconds)}</p></div>
+        </div>
+        {r.allPassed && r.bestSeconds != null && r.seconds === r.bestSeconds && (r.submittedAttempts ?? 1) > 1 && (
+          <p className="pop -mt-2 mb-4 text-center text-[13px] font-semibold text-ok">New personal best on this question</p>
+        )}
         <div className="mb-5 flex items-center justify-center gap-6 rounded-xl bg-card2 p-5 border border-sep">
           <Ring value={shown} size={92} stroke={9} mastered={r.mastered} />
           <div>

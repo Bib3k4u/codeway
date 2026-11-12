@@ -15,11 +15,17 @@ export interface Challenge {
   scaffolding: "HEAVY" | "PARTIAL" | "BLANK"; expectedMinutes: number; files: Files;
   testNames: string[]; sampleOutput: string; examples?: TestExample[];
 }
-export interface StartResp {
+export interface StartResp extends TimeRecord {
   attemptId: number; challenge: Challenge; mastery: MasteryView;
   resumed: boolean; draft?: Files; hints?: Hint[]; lastRun?: RunResp; startedAt?: string;
   /** redo of a past challenge: graded, mastery unchanged */
   practice?: boolean; revealed?: number[];
+  /** clock: the attempt's start (moves forward over breaks) and the server's time, to correct for a skewed device clock */
+  serverNow?: string;
+}
+/** The learner's record on a challenge. */
+export interface TimeRecord {
+  attemptNumber?: number; submittedAttempts?: number; bestSeconds?: number | null; longestSeconds?: number | null;
 }
 export interface HistoryRow { title: string; difficulty: number; passed: number; total: number; delta: number; hints: number; at: string }
 export interface Diagnostic { file: string; line: number; severity: string; message: string }
@@ -36,12 +42,24 @@ export interface SubmitResp extends RunResp {
   scoreBefore: number; scoreAfter: number; delta: number; streak: number; streakGoal: number;
   mastered: boolean; cleanPass: boolean; calibration: string; feedback: string[]; minutes: number;
   /** 0..1, read from how the learner worked; calibration holds its label (fluent / steady / effortful) */
-  fluency?: number; practice?: boolean;
+  fluency?: number; practice?: boolean; seconds?: number;
+  bestSeconds?: number | null; longestSeconds?: number | null; attemptNumber?: number; submittedAttempts?: number;
 }
 export interface RevealResp { index: number; name: string; passed?: boolean; message?: string; reveals: number }
 export interface HistoryItem {
   attemptId: number; challengeId: number; title: string; concept: string; conceptTitle: string; language: string;
   difficulty: number; passed: number; total: number; delta: number; hints: number; practice: boolean; at: string;
+  track: string; seconds: number | null; attemptNumber: number;
+}
+export interface ChallengeGroup {
+  challengeId: number; title: string; concept: string; conceptTitle: string; track: string; language: string; difficulty: number;
+  attempts: HistoryItem[]; solved: number; bestSeconds: number | null; lastAt: string;
+}
+export interface HistorySummary {
+  days: { date: string; minutes: number; solved: number; submitted: number }[];
+  byConcept: { concept: string; conceptTitle: string; track: string; attempts: number; solved: number; seconds: number }[];
+  byLanguage: { language: string; attempts: number; solved: number }[];
+  totals: { attempts: number; solved: number; challenges: number; minutes: number; avgMinutes: number };
 }
 export interface HistoryPage { items: HistoryItem[]; page: number; size: number; total: number; pages: number }
 export interface AttemptDetail {
