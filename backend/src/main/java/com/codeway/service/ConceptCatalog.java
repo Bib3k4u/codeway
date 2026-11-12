@@ -22,7 +22,7 @@ public class ConceptCatalog {
 
     public static final List<Track> TRACKS = List.of(
             new Track("oop", 1, "Object-oriented programming", "Model the world in classes and objects: the foundation everything else builds on.", true),
-            new Track("solid", 2, "SOLID principles", "Five rules that keep object-oriented code easy to change.", false),
+            new Track("solid", 2, "SOLID principles", "Five rules that keep object-oriented code easy to change.", true),
             new Track("patterns", 3, "Design patterns", "Proven, named solutions to problems that keep coming back.", false),
             new Track("lld", 4, "Low-level design", "Turn requirements into classes and working code for real systems.", false));
 

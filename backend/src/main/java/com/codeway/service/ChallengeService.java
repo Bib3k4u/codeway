@@ -66,7 +66,7 @@ public class ChallengeService {
         for (int attempt = 1; attempt <= MAX_GENERATION_TRIES; attempt++) {
             try {
                 Lang lang = Lang.of(language);
-                String raw = ai.chat(ai.model(), system(lang), userPrompt(lang, c.title(), difficulty, scaffolding, avoid), true);
+                String raw = ai.chat(ai.model(), system(lang), userPrompt(lang, c, difficulty, scaffolding, avoid), true);
                 Challenge ch = parse(raw, language, concept, difficulty, scaffolding);
                 String problem = validate(ch);
                 if (problem == null) {
@@ -387,7 +387,38 @@ public class ChallengeService {
         };
     }
 
-    private static String userPrompt(Lang lang, String concept, int difficulty, String scaffolding, String avoid) {
+    /**
+     * What a good exercise looks like for each track. OOP exercises build a feature; SOLID exercises are design work:
+     * fix or finish a design so it follows the principle, with tests that check the design as well as the behaviour.
+     */
+    static String trackRules(ConceptCatalog.Concept c, Lang lang) {
+        if (!"solid".equals(c.track())) return "";
+        String design = switch (c.id()) {
+            case "single-responsibility" -> "A class that mixes several jobs (e.g. calculating, formatting and saving a report). The learner splits it so each class has one reason to change. Tests check each new class does its one job, and that the original entry point still produces the same result by delegating.";
+            case "open-closed" -> "Code that picks behaviour with if/switch on a type code (e.g. discount or shipping rules). The learner introduces an abstraction so new variants are added as new classes without editing the calculator. Tests check every existing variant still works AND that a brand-new variant written only in the test file plugs in without changing learner code.";
+            case "liskov-substitution" -> "A subtype that breaks its base type's promises (e.g. a Square that changes both sides, a read-only collection that throws on add, a bird that can't fly). The learner fixes the hierarchy so every subtype can stand in for its base. Tests run the SAME checks against every subtype through the base type and must pass for all of them.";
+            case "interface-segregation" -> "One fat interface that forces classes to implement methods they can't support (e.g. a multifunction device interface on a basic printer). The learner splits it into small role interfaces. Tests check each class implements only the roles it really supports and that client code depending on one role works with any class that has it.";
+            case "dependency-inversion" -> "A high-level class that creates its low-level dependency itself (e.g. new EmailSender() inside a notifier). The learner makes it depend on an abstraction passed in through the constructor. Tests inject a fake implementation written in the test file and check the high-level class uses it.";
+            default -> "A design that breaks the principle; the learner fixes it.";
+        };
+        String checks = switch (lang) {
+            case JAVA -> "Design checks in Java may use plain language features and reflection (e.g. `Notifier.class.getConstructor(MessageSender.class)`, `Shape.class.isInterface()`, `x instanceof Payable`).";
+            case PYTHON -> "Design checks in Python may use isinstance/issubclass, abc.ABC, inspect.signature, or a fake class defined in the test file.";
+            case JAVASCRIPT -> "Design checks in JavaScript may use instanceof, typeof x.method === 'function', or a fake class defined in the test file.";
+            case CPP -> "Design checks in C++ must happen at run time (no static_assert): use dynamic_cast, std::is_base_of_v (include <type_traits>) inside check::is_true, or a fake class defined in the test file that derives from the learner's interface.";
+        };
+        return """
+                This is a SOLID principles exercise about "%s": %s
+                Make it a design exercise, not just a feature: %s
+                The starter must be realistic, small code with the design problem (HEAVY: the refactor is half done with TODOs;
+                PARTIAL: the problem code plus empty new types to fill; BLANK: only the problem code). Name every type the tests rely on
+                in descriptionMd (interfaces, classes, constructor parameters). %s
+                Add a "## Why" section to descriptionMd (2-3 sentences: what goes wrong with the original design and what the principle buys).
+                """.formatted(c.title(), c.summary(), design, checks);
+    }
+
+    private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid) {
+        String concept = c.title();
         String scaffoldRule = switch (scaffolding) {
             case "HEAVY" -> "HEAVY scaffolding: the starter is almost complete. Most classes are written; the learner fills 2-3 clearly marked TODO gaps.";
             case "PARTIAL" -> "PARTIAL scaffolding: the starter has class skeletons, signatures and TODO comments; the learner writes the bodies and some members.";
@@ -397,6 +428,7 @@ public class ChallengeService {
                 Create ONE %1$s exercise teaching: %2$s
                 Difficulty: %3$d out of 5. %4$s
                 Avoid repeating these existing titles: %5$s
+                %9$s
 
                 Return JSON with exactly these keys:
                 {
@@ -424,6 +456,6 @@ public class ChallengeService {
                 - Directly under the Example block add a short "Format:" bullet list that removes all guesswork about printing:
                   one item per printed line pattern, saying exactly what goes on each line, separators (e.g. ": " with one space),
                   number formatting (e.g. 2 decimal places), capitalisation, and that each item is on its own line.
-                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang));
+                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang));
     }
 }

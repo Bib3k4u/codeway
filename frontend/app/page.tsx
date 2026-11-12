@@ -24,7 +24,7 @@ const RUN = [
 
 const TRACKS = [
   { n: "01", title: "Object-oriented programming", status: "Practice open", topics: "Classes and objects, encapsulation, inheritance, polymorphism, abstraction, interfaces" },
-  { n: "02", title: "SOLID principles", status: "Lessons open", topics: "Single responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion" },
+  { n: "02", title: "SOLID principles", status: "Practice open", topics: "Single responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion" },
   { n: "03", title: "Design patterns", status: "Lessons open", topics: "Singleton, factory, builder, adapter, decorator, facade, strategy, observer, command, state" },
   { n: "04", title: "Low-level design", status: "Lessons open", topics: "Parking lot, elevator, library system, Splitwise, rate limiter: from requirements to classes to working code" },
 ];
@@ -221,7 +221,7 @@ function HomePage() {
               </li>
             ))}
           </ol>
-          <p className="mt-6 text-[14.5px] text-label2">Every lesson is in Java, Python, JavaScript and C++. Practice is open for OOP; SOLID, patterns and LLD challenges come next.</p>
+          <p className="mt-6 text-[14.5px] text-label2">Every lesson is in Java, Python, JavaScript and C++. Practice is open for OOP and SOLID; design patterns and LLD challenges come next.</p>
         </Block>
 
         {/* closing */}
@@ -269,7 +269,7 @@ function HomePage() {
 /** Every topic across the tracks; the live ones carry a yellow dot. */
 const TOPICS: [string, boolean][] = [
   ["Classes & Objects", true], ["Encapsulation", true], ["Inheritance", true], ["Polymorphism", true], ["Abstraction", true], ["Interfaces", true],
-  ["Single Responsibility", false], ["Open/Closed", false], ["Liskov Substitution", false], ["Dependency Inversion", false],
+  ["Single Responsibility", true], ["Open/Closed", true], ["Liskov Substitution", true], ["Interface Segregation", true], ["Dependency Inversion", true],
   ["Singleton", false], ["Factory", false], ["Builder", false], ["Strategy", false], ["Observer", false], ["Decorator", false], ["Command", false],
   ["Parking Lot", false], ["Elevator System", false], ["Splitwise", false], ["Rate Limiter", false],
 ];
@@ -289,7 +289,7 @@ function TopicTicker() {
     <div className="border-t border-sep">
       <div className="mx-auto flex max-w-[1440px] items-center gap-6 px-5 py-5 sm:px-8 xl:px-12">
         <p className="shrink-0 text-[13px] font-semibold text-label2"><span className="text-accent">●</span> Live now <span className="mx-2 text-label3">/</span><span className="text-label3">Coming next</span></p>
-        <div className="marquee min-w-0 flex-1 overflow-hidden" aria-label="Topics: OOP concepts available now, then SOLID, design patterns and low-level design">
+        <div className="marquee min-w-0 flex-1 overflow-hidden" aria-label="Topics: OOP and SOLID available now, then design patterns and low-level design">
           <div className="marquee-track">{row(false)}{row(true)}</div>
         </div>
       </div>

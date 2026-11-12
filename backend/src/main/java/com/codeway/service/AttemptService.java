@@ -342,7 +342,7 @@ public class AttemptService {
             try {
                 String levelRule = switch (level) {
                     case 1 -> "Give a NUDGE: one short guiding question that redirects the learner's thinking. Do not reveal the answer or write code.";
-                    case 2 -> "Give a CONCEPTUAL hint: explain the OOP idea that unlocks the problem in 2-4 sentences. No code.";
+                    case 2 -> "Give a CONCEPTUAL hint: explain the design idea (the OOP concept or SOLID principle) that unlocks the problem in 2-4 sentences. No code.";
                     default -> "Give PARTIAL CODE: a small " + ConceptCatalog.label(ch.language) + " snippet (max 8 lines) for the single most blocking step. Do not provide the whole solution.";
                 };
                 StringBuilder sb = new StringBuilder("Challenge:\n").append(ch.descriptionMd).append("\n\nLearner's current files:\n");
