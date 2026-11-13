@@ -57,16 +57,22 @@ public class ChallengeService {
         }
         List<Challenge> unseen = bank.stream().filter(c -> !lastSeen.containsKey(c.id)).toList();
 
+        boolean guided = catalog.isGuided(concept);
+        // Guided (pattern) challenges grow from a hand-written anchor scenario: the learner's first one is always the anchor
+        // itself in their language, then come fresh AI variants of it (new domain, new twist), each validated like the anchor and shared.
+        if (guided) {
+            var root = anchor(concept);
+            if (root.isPresent()) {
+                Challenge mine = "java".equals(language) ? root.get()
+                        : bank.stream().filter(c -> family(c) == root.get().id).findFirst().orElse(null);
+                if (mine == null) mine = inLanguage(root.get(), language);       // translated once, then shared
+                if (mine != null && !lastSeen.containsKey(mine.id)) return mine;
+            }
+        }
+
         var exact = unseen.stream().filter(c -> c.difficulty == difficulty && c.scaffolding.equals(scaffolding)).findFirst();
         if (exact.isPresent()) return exact.get();
 
-        boolean guided = catalog.isGuided(concept);
-        // Guided (pattern) challenges grow from a hand-written anchor scenario: first the anchor itself in the learner's
-        // language, then fresh AI variants of it (new domain, new twist), each validated like the anchor and shared.
-        if (guided && bank.isEmpty() && !"java".equals(language)) {
-            var anchor = anchor(concept);
-            if (anchor.isPresent()) { Challenge t = inLanguage(anchor.get(), language); if (t != null) return t; }
-        }
         if (ai.isConfigured() && !(guided && bank.isEmpty())) {
             Challenge g = generate(language, concept, difficulty, scaffolding, bank);
             if (g != null) return g;
@@ -134,23 +140,43 @@ public class ChallengeService {
         if (root.isPresent()) return root.get();
         if (!ai.isConfigured()) return null;
         Lang lang = Lang.of(language);
-        for (int attempt = 1; attempt <= 2; attempt++) {
+        String feedback = "";
+        int tries = src.guideJson != null ? 3 : 2;               // guided exercises are shared by everyone, so it is worth a third go
+        for (int attempt = 1; attempt <= tries; attempt++) {
             try {
-                String raw = ai.chat(ai.model(), system(lang), translatePrompt(src, lang), true);
+                String raw = ai.chat(ai.model(), system(lang), translatePrompt(src, lang) + feedback, true);
                 Challenge ch = parse(raw, language, src.concept, src.difficulty, src.scaffolding);
                 ch.expectedMinutes = src.expectedMinutes;
-                ch.guideJson = src.guideJson;               // quiz, steps and reveal are language-neutral
+                ch.guideJson = withSteps(src.guideJson, raw);   // quiz and reveal are language-neutral; the steps are re-worded for this language's names
                 String problem = validate(ch);
                 if (problem == null) {
                     ch.validated = true; ch.origin = "ai-translation"; ch.familyId = fam;
                     return challenges.save(ch);
                 }
                 System.err.println("[challenge] translation " + attempt + " rejected: " + problem);
+                feedback = "\n\nYour previous translation was rejected when it was compiled and run: " + (problem.length() > 1200 ? problem.substring(0, 1200) : problem)
+                        + "\nFix exactly that and return the complete JSON again.";
             } catch (Exception e) {
                 System.err.println("[challenge] translation " + attempt + " failed: " + e.getMessage());
+                feedback = "\n\nYour previous answer could not be read as the required JSON (" + String.valueOf(e.getMessage()).split("\n")[0].substring(0, Math.min(160, String.valueOf(e.getMessage()).split("\n")[0].length()))
+                        + "). Every files value (starterFiles, referenceSolution, tests) must be an object mapping file name to file text.";
             }
         }
         return null;
+    }
+
+    /** The guide with the translator's steps swapped in, when it returned the same number of well-formed ones; else unchanged. */
+    static String withSteps(String guideJson, String raw) {
+        try {
+            JsonNode theirs = Json.M.readTree(raw).path("steps");
+            com.fasterxml.jackson.databind.node.ObjectNode g = (com.fasterxml.jackson.databind.node.ObjectNode) Json.M.readTree(guideJson);
+            if (!theirs.isArray() || theirs.size() != g.path("steps").size()) return guideJson;
+            for (JsonNode st : theirs) if (st.path("title").asText("").isBlank() || st.path("md").asText("").isBlank()) return guideJson;
+            g.set("steps", theirs);
+            return Json.M.writeValueAsString(g);
+        } catch (Exception e) {
+            return guideJson;
+        }
     }
 
     private static String translatePrompt(Challenge src, Lang lang) {
@@ -161,6 +187,7 @@ public class ChallengeService {
         source.put("referenceSolution", Json.files(src.referenceSolutionJson));
         source.put("tests", Json.files(src.testsJson));
         source.put("hints", Json.strings(src.hintsJson));
+        try { if (src.guideJson != null) source.put("steps", Json.M.readValue(src.guideJson, Map.class).get("steps")); } catch (Exception ignored) { }
         return """
                 Translate this %1$s exercise into %2$s. It must be the SAME exercise: same title, same story, same classes and
                 behaviour, same requirements, same test cases in the same order with the same names, and the same scaffolding
@@ -178,6 +205,12 @@ public class ChallengeService {
                 - descriptionMd keeps the same sections; its Example block must be exactly what the reference %5$s prints.
                 """.formatted(Lang.of(src.language).label, lang.label, Json.write(source), langRules(lang), lang.mainFile, lang.testFile)
                 + (src.guideJson == null ? "" : """
+                - Where the source uses a lambda or anonymous class for a single-method interface, write a small named class (or, in JavaScript, an object)
+                  that has that method, in the starter's stubs, the reference and the tests alike, so every call site is written `thing.method(args)` and never
+                  calls a bare function. Interfaces become abstract base classes (Python: abc or a plain base class; C++: a class with a virtual method and a
+                  virtual destructor; hold implementations by std::shared_ptr or std::unique_ptr; JavaScript: a base class that throws "not implemented").
+                - Also return the key "steps": the same steps, same count and order, with every class, method and file name, signature and example
+                  rewritten for the target language exactly as your starterFiles and tests use them (so a learner can follow the step text literally).
                 - Keep EVERY test name exactly as in the source, including its "Guard:" or "S1:", "S2:"... prefix and order. The starter is
                   WORKING code: it must pass all "Guard:" tests, and keep the new empty types the step tests refer to (as stubs with TODOs).
                 """);
@@ -390,7 +423,9 @@ public class ChallengeService {
         ch.descriptionMd = n.path("descriptionMd").asText();
         ch.expectedMinutes = Math.max(3, Math.min(45, n.path("expectedMinutes").asInt(10)));
         ch.starterFilesJson = Json.write(Json.M.convertValue(n.path("starterFiles"), Map.class));
-        ch.testsJson = Json.write(Json.M.convertValue(n.path("tests"), Map.class));
+        // the single test file is sometimes returned as bare text instead of {"file": "text"}
+        JsonNode tests = n.path("tests");
+        ch.testsJson = tests.isTextual() ? Json.write(Map.of(Lang.of(language).testFile, tests.asText())) : Json.write(Json.M.convertValue(tests, Map.class));
         ch.referenceSolutionJson = Json.write(Json.M.convertValue(n.path("referenceSolution"), Map.class));
         ch.hintsJson = Json.write(Json.M.convertValue(n.path("hints"), List.class));
         if (n.path("guide").isObject()) ch.guideJson = Json.write(Json.M.convertValue(n.path("guide"), Map.class));

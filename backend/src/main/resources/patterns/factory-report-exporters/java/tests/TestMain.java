@@ -113,19 +113,19 @@ public class TestMain {
         // ---- step 4: a brand-new format, defined right here, with no change to existing classes ----
         Check.run("S4: a supplier registered at runtime is used by create", () -> {
             ExporterRegistry registry = new ExporterRegistry();
-            registry.register("upper", UpperCaseExporter::new);
+            registry.addFormat("upper", UpperCaseExporter::new);
             Check.eq("A|B,C", registry.create("upper").export(rows));
             Check.eq("- a\n- b,c", registry.create("text").export(rows));   // the built-in formats are untouched
         });
         Check.run("S4: a service using that registry can export the new format", () -> {
             ExporterRegistry registry = new ExporterRegistry();
-            registry.register("upper", UpperCaseExporter::new);
+            registry.addFormat("upper", UpperCaseExporter::new);
             Check.eq("A|B,C", new ReportService(registry).export("upper", rows));
             Check.eq("[\"a\",\"b,c\"]", new ReportService(registry).export("json", rows));
         });
         Check.run("S4: registering a name again replaces it, and other registries are not affected", () -> {
             ExporterRegistry first = new ExporterRegistry();
-            first.register("text", () -> r -> "replaced");
+            first.addFormat("text", () -> r -> "replaced");
             Check.eq("replaced", first.create("text").export(rows));
             ExporterRegistry second = new ExporterRegistry();
             Check.eq("- a\n- b,c", second.create("text").export(rows));

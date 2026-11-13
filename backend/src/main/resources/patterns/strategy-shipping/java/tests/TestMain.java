@@ -76,7 +76,7 @@ public class TestMain {
         // ---- step 4: a brand-new delivery type, defined right here, with no change to existing classes ----
         Check.run("S4: a rule registered at runtime (a lambda defined in the test) is used", () -> {
             ShippingCalculator calc = new ShippingCalculator();
-            calc.register("drone", kg -> 8.0 + 0.5 * kg);
+            calc.addRule("drone", kg -> 8.0 + 0.5 * kg);
             Check.eq(9.0, calc.cost("drone", 2.0), EPS);
             Check.eq(7.0, calc.cost("standard", 2.0), EPS);   // the old types are untouched
         });
@@ -88,12 +88,12 @@ public class TestMain {
                 }
             }
             ShippingCalculator calc = new ShippingCalculator();
-            calc.register("freight", new FreightShipping());
+            calc.addRule("freight", new FreightShipping());
             Check.eq(100.0, calc.cost("freight", 200.0), EPS);
         });
         Check.run("S4: registering a name again replaces the old rule, and other calculators are not affected", () -> {
             ShippingCalculator first = new ShippingCalculator();
-            first.register("standard", kg -> 0.0);
+            first.addRule("standard", kg -> 0.0);
             Check.eq(0.0, first.cost("standard", 5.0), EPS);
             ShippingCalculator second = new ShippingCalculator();
             Check.eq(10.0, second.cost("standard", 5.0), EPS);

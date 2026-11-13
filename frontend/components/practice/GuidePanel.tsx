@@ -104,6 +104,7 @@ function Diagnose({ quiz, onAnswer }: { quiz: QuizState; onAnswer: (option: stri
     <section className="rounded-xl border border-[var(--accent-fill)] bg-card2 p-4" aria-label="Diagnose the code">
       <p className="mb-1 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wider text-label3"><Search size={13} />Diagnose first</p>
       <p className="mb-3 text-[14.5px] font-semibold leading-snug">{quiz.question}</p>
+      <p className="-mt-1.5 mb-3 text-[12.5px] text-label3">The code is on the right. The story is in the Brief tab.</p>
       <div className="space-y-1.5" role="radiogroup" aria-label="Principles">
         {quiz.options.map((o) => (
           <button key={o.id} role="radio" aria-checked={pick === o.id} onClick={() => { setPick(o.id); setWrong(false); }}

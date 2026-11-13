@@ -11,7 +11,7 @@ public class ExporterRegistry {
     }
 
     // TODO (step 4): remember the supplier under that format name so create(format) can use it
-    public void register(String format, Supplier<Exporter> supplier) {
+    public void addFormat(String format, Supplier<Exporter> supplier) {
         throw new UnsupportedOperationException("TODO (step 4)");
     }
 }

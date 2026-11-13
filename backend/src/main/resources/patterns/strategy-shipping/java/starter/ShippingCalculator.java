@@ -26,7 +26,7 @@ public class ShippingCalculator {
     }
 
     // TODO (step 4): store the rule under that type name so cost(type, kg) can use it
-    public void register(String type, ShippingRule rule) {
+    public void addRule(String type, ShippingRule rule) {
         throw new UnsupportedOperationException("TODO (step 4)");
     }
 }

@@ -1,7 +1,7 @@
 import java.util.HashMap;
 import java.util.Map;
 
-/** Prices a parcel by looking up the rule for its delivery type. New types are added with register(). */
+/** Prices a parcel by looking up the rule for its delivery type. New types are added with addRule(). */
 public class ShippingCalculator {
     private final Map<String, ShippingRule> rules = new HashMap<>();
 
@@ -23,7 +23,7 @@ public class ShippingCalculator {
         return rule.cost(kg);
     }
 
-    public void register(String type, ShippingRule rule) {
+    public void addRule(String type, ShippingRule rule) {
         rules.put(type, rule);
     }
 }

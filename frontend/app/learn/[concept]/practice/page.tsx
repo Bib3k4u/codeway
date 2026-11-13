@@ -54,7 +54,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const [active, setActive] = useState("");
   const [busy, setBusy] = useState<Busy>(null);
   const [run, setRun] = useState<RunResp | null>(null);
-  const [left, setLeft] = useState<"brief" | "hints">("brief");
+  const [left, setLeft] = useState<"brief" | "steps" | "hints">("brief");
   const [bottom, setBottom] = useState<"console" | "tests">("console");
   const [hints, setHints] = useState<Hint[]>([]);
   const [hintQuota, setHintQuota] = useState<QuotaState | null>(null);
@@ -103,7 +103,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const descWidth = Math.min(680, Math.max(280, Number(descW) || 380));
   // In focus mode the brief starts hidden but can be shown; outside it, the saved preference applies.
   const [focusBrief, setFocusBrief] = useState(false);
-  // the diagnose question lives in the brief, so a guided challenge keeps it open until it is answered
+  // the diagnose question lives in the left pane, so a guided challenge keeps it open until it is answered
   const briefRequired = !!start?.guide && !(quiz ?? start.guide.quiz).solved;
   const showDesc = briefRequired || (focus ? focusBrief : descHidden !== "1");
   const toggleBrief = () => (focus ? setFocusBrief((v) => !v) : setDescHidden(descHidden === "1" ? "0" : "1"));
@@ -175,7 +175,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
         saved.current = initial;
-        setStart(r); setQuiz(r.guide?.quiz ?? null); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
+        setStart(r); setQuiz(r.guide?.quiz ?? null); setLeft(r.guide ? "steps" : "brief"); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
         const names = Object.keys(initial);
         const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
         setOpen([first]); setActive(first);
@@ -387,6 +387,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
           <div className="pane-head justify-between">
             <div className="flex self-stretch" role="tablist" aria-label="Brief and hints">
               <button role="tab" className="ptab" aria-selected={left === "brief"} onClick={() => setLeft("brief")}>Brief</button>
+              {guide && <button role="tab" className="ptab" aria-selected={left === "steps"} onClick={() => setLeft("steps")}>Steps{!guide.quiz.solved && <span className="h-1.5 w-1.5 rounded-full bg-accentfill" aria-label="Question waiting" />}</button>}
               <button role="tab" className="ptab" aria-selected={left === "hints"} onClick={() => setLeft("hints")}>Hints{hintLevel > 0 && <span className="chip !h-[18px] !px-1.5 !text-[10px]">{hintLevel}</span>}</button>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={getHint} disabled={busy !== null || hintLevel >= 4 || hintsBlocked}
@@ -400,7 +401,9 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
             <p role="status" className="mx-6 mt-4 rounded-xl px-3.5 py-2.5 text-[13px] leading-snug text-warn" style={{ background: "var(--orange-soft)" }}>{hintNote}</p>
           )}
           <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-            {left === "brief" ? (
+            {left === "steps" && guide ? (
+              <GuidePanel guide={guide} names={ch.testNames} tests={testRun?.tests} onAnswer={answerQuiz} />
+            ) : left === "brief" ? (
               <>
                 <Markdown compact>{ch.descriptionMd}</Markdown>
                 {ch.sampleOutput && (
@@ -408,7 +411,6 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                     <ExpectedOutput expected={ch.sampleOutput} />
                   </section>
                 )}
-                {guide && <section className="mt-6"><GuidePanel guide={guide} names={ch.testNames} tests={testRun?.tests} onAnswer={answerQuiz} /></section>}
                 {!guide && ch.testNames.length > 0 && (
                   <section className="mt-6">
                     <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-label3">Your code is checked for</h3>
@@ -531,7 +533,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               <div className="flex min-w-0 flex-1 flex-col">
                 {locked && (
                   <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
-                    <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the brief to start editing.
+                    <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the Steps tab to start editing.
                   </p>
                 )}
                 <div className="min-h-0 flex-1">
@@ -722,7 +724,7 @@ function RevealCard({ reveal }: { reveal: PatternReveal }) {
   return (
     <div className="pop mb-6 rounded-xl border border-[var(--accent-fill)] bg-card2 p-4">
       <p className="text-[11.5px] font-semibold uppercase tracking-wider text-label3">What you just built</p>
-      <p className="mt-0.5 text-[22px] font-bold tracking-tight">{reveal.pattern} <span className="text-[13px] font-medium text-label3">· fixes a {reveal.principle} problem</span></p>
+      <p className="mt-0.5 text-[22px] font-bold tracking-tight">{reveal.pattern} <span className="text-[13px] font-medium text-label3">· the fix for {reveal.principle}</span></p>
       {reveal.roles && reveal.roles.length > 0 && (
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13.5px]">
           {reveal.roles.map((x) => (

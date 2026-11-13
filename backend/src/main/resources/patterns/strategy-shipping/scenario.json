@@ -30,7 +30,7 @@
       },
       {
         "title": "Add a delivery type at runtime",
-        "md": "The goal of the whole refactoring: a new delivery type must not require editing any class that already exists.\n\nImplement `public void register(String type, ShippingRule rule)` in `ShippingCalculator`. It stores the rule under that type name in the calculator's own map, so that `cost(type, kg)` uses it from then on. Registering a name that already exists replaces the old rule. Two different `ShippingCalculator` objects must not share their rules.\n\nThe tests prove it by defining new delivery types inside the test file itself (a lambda and a small class) and registering them, without touching `ShippingCalculator`, `ShippingRule` or the three shipping classes."
+        "md": "The goal of the whole refactoring: a new delivery type must not require editing any class that already exists.\n\nImplement `public void addRule(String type, ShippingRule rule)` in `ShippingCalculator`. It stores the rule under that type name in the calculator's own map, so that `cost(type, kg)` uses it from then on. Adding a rule under a name that already exists replaces the old rule. Two different `ShippingCalculator` objects must not share their rules.\n\nThe tests prove it by defining new delivery types inside the test file itself (a lambda and a small class) and adding them, without touching `ShippingCalculator`, `ShippingRule` or the three shipping classes."
       }
     ],
     "reveal": {
@@ -39,7 +39,7 @@
       "roles": [
         { "name": "Context", "is": "ShippingCalculator" },
         { "name": "Strategy", "is": "ShippingRule" },
-        { "name": "ConcreteStrategy", "is": "StandardShipping, ExpressShipping and OvernightShipping (and any rule registered later, like the ones in the tests)" }
+        { "name": "ConcreteStrategy", "is": "StandardShipping, ExpressShipping and OvernightShipping (and any rule added later, like the ones in the tests)" }
       ],
       "summary": "The Strategy pattern puts each interchangeable algorithm behind one interface and lets a context object pick one and delegate to it. Here it turned a growing switch into small rule classes, so a new delivery type is new code instead of an edit to ShippingCalculator. Do not use it when there are only two or three variants that will never change, or when the variants differ by a single value: a plain if or a parameter is simpler, and extra classes would only add indirection."
     }
