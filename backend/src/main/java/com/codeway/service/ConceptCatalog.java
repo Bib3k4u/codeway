@@ -23,7 +23,7 @@ public class ConceptCatalog {
     public static final List<Track> TRACKS = List.of(
             new Track("oop", 1, "Object-oriented programming", "Model the world in classes and objects: the foundation everything else builds on.", true),
             new Track("solid", 2, "SOLID principles", "Five rules that keep object-oriented code easy to change.", true),
-            new Track("patterns", 3, "Design patterns", "Proven, named solutions to problems that keep coming back.", false),
+            new Track("patterns", 3, "Design patterns", "Proven, named solutions to problems that keep coming back.", true),
             new Track("lld", 4, "Low-level design", "Turn requirements into classes and working code for real systems.", false));
 
     private static final List<Concept> CONCEPTS = List.of(
@@ -59,6 +59,14 @@ public class ConceptCatalog {
             new Concept("splitwise", "lld", null, "Splitwise", "Groups, expenses and settling up balances.", "split"),
             new Concept("rate-limiter", "lld", null, "Rate limiter", "Token bucket and sliding window, behind one interface.", "gauge"));
 
+    /**
+     * Patterns with guided practice: diagnose the principle a piece of code breaks, then refactor it step by step into the
+     * pattern. The rest of the track is lessons for now. Each has a hand-written anchor scenario under resources/patterns.
+     */
+    public static final Set<String> GUIDED = Set.of("strategy", "observer", "factory-method", "decorator");
+
+    public boolean isGuided(String conceptId) { return GUIDED.contains(conceptId); }
+
     public List<Track> tracks() { return TRACKS; }
 
     public Optional<Track> track(String id) { return TRACKS.stream().filter(t -> t.id().equals(id)).findFirst(); }
@@ -72,6 +80,11 @@ public class ConceptCatalog {
 
     /** True when auto-graded practice is open for this concept (its track has practice) in this language. */
     public boolean practiceOpen(String language, String conceptId) {
-        return LANGUAGES.contains(language) && find(language, conceptId).flatMap(c -> track(c.track())).map(Track::practice).orElse(false);
+        if (!LANGUAGES.contains(language)) return false;
+        var c = find(language, conceptId);
+        if (c.isEmpty()) return false;
+        // in the patterns track only the guided concepts have practice so far
+        if ("patterns".equals(c.get().track())) return GUIDED.contains(conceptId);
+        return track(c.get().track()).map(Track::practice).orElse(false);
     }
 }

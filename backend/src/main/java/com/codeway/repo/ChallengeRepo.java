@@ -8,5 +8,6 @@ public interface ChallengeRepo extends JpaRepository<Challenge, Long> {
     List<Challenge> findByLanguageAndConceptAndValidatedTrue(String l, String c);
     boolean existsByTitleAndOrigin(String title, String origin);
     Optional<Challenge> findByTitleAndOrigin(String title, String origin);
+    Optional<Challenge> findByTitleAndLanguageAndOrigin(String title, String language, String origin);
     List<Challenge> findByLanguageAndConceptAndFamilyIdAndValidatedTrue(String l, String c, Long familyId);
 }

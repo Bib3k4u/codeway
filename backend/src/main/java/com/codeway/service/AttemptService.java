@@ -58,7 +58,12 @@ public class AttemptService {
                 if (c != null && c.language.equals(language) && c.concept.equals(concept) && ChallengeService.family(c) == fam) return resume(o, c, m);
             }
             Challenge same = challengeService.inLanguage(cur, language);
-            if (same != null) return startView(newAttempt(userId, same, m, current.isPractice()), same, m, false);
+            if (same != null) {
+                Attempt moved = newAttempt(userId, same, m, current.isPractice());
+                moved.quizTries = current.quizTries; moved.quizSolved = current.quizSolved;     // the diagnosis carries over
+                attempts.save(moved);
+                return startView(moved, same, m, false);
+            }
             // no translation possible (e.g. AI unavailable): fall back to this language's own question
         }
         for (Attempt o : open) {
@@ -123,6 +128,8 @@ public class AttemptService {
         out.put("practice", a.isPractice());
         out.put("revealed", revealed(a));
         out.put("hintQuota", hintQuota(a.userId).view());
+        var guide = guideView(ch, a);
+        if (guide != null) out.put("guide", guide);
         out.put("startedAt", a.startedAt.toString());
         out.put("serverNow", Instant.now().toString());
         out.putAll(timeRecord(a.userId, ch.id, a.id));
@@ -260,11 +267,61 @@ public class AttemptService {
         out.put("cleanPass", o.cleanPass());
         out.put("fluency", round(o.fluency()));
         out.put("calibration", o.fluencyLabel());
+        if (total > 0 && passed == total) {
+            JsonNode g = ChallengeService.guide(ch);
+            if (g != null && g.hasNonNull("reveal")) {            // finished a guided challenge: now it can be named
+                @SuppressWarnings("unchecked") Map<String, Object> rv = new LinkedHashMap<>(Json.M.convertValue(g.get("reveal"), Map.class));
+                rv.put("concept", ch.concept);
+                out.put("reveal", rv);
+            }
+        }
         out.put("feedback", feedback(signals, o, passed, total, a.isPractice()));
         out.put("minutes", round(minutes));
         out.put("seconds", a.elapsedSeconds);
         out.putAll(timeRecord(userId, ch.id, null));
         return out;
+    }
+
+    // ---- guided challenges ----
+    /** What the browser may see of a guide: the question and options always, the answer and why only once it's done. */
+    Map<String, Object> guideView(Challenge ch, Attempt a) {
+        JsonNode g = ChallengeService.guide(ch);
+        if (g == null) return null;
+        boolean done = Boolean.TRUE.equals(a.quizSolved);
+        Map<String, Object> quiz = new LinkedHashMap<>();
+        quiz.put("question", g.path("quiz").path("question").asText());
+        quiz.put("options", Json.M.convertValue(g.path("quiz").path("options"), List.class));
+        quiz.put("tries", a.quizTries == null ? 0 : a.quizTries);
+        quiz.put("solved", done);
+        if (done) {
+            quiz.put("answers", Json.M.convertValue(g.path("quiz").path("answers"), List.class));
+            quiz.put("explanation", g.path("quiz").path("explanation").asText());
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("quiz", quiz);
+        out.put("steps", Json.M.convertValue(g.path("steps"), List.class));
+        return out;
+    }
+
+    /** Answer the diagnose question. It is done on a right answer, or after two tries (then the answer is shown, so nobody is stuck). */
+    public Map<String, Object> answerQuiz(Long userId, Long attemptId, String optionId) {
+        Attempt a = owned(userId, attemptId);
+        Challenge ch = challenges.findById(a.challengeId).orElseThrow();
+        JsonNode g = ChallengeService.guide(ch);
+        if (g == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This challenge has no diagnose question");
+        Set<String> answers = new HashSet<>();
+        g.path("quiz").path("answers").forEach(n -> answers.add(n.asText()));
+        boolean correct = optionId != null && answers.contains(optionId);
+        if (!Boolean.TRUE.equals(a.quizSolved)) {
+            a.quizTries = (a.quizTries == null ? 0 : a.quizTries) + 1;
+            if (correct || a.quizTries >= 2) a.quizSolved = true;
+            a.lastActiveAt = Instant.now();
+            attempts.save(a);
+            logEvent(a.id, "quiz", "{\"correct\":" + correct + "}");
+        }
+        @SuppressWarnings("unchecked") Map<String, Object> quiz = new LinkedHashMap<>((Map<String, Object>) guideView(ch, a).get("quiz"));
+        quiz.put("correct", correct);
+        return quiz;
     }
 
     // ---- clock ----
@@ -468,7 +525,7 @@ public class AttemptService {
     /** Test names for the UI: the example tests by name, the rest as "Hidden test N". */
     static List<String> maskedNames(Challenge ch) {
         List<String> names = ChallengeService.testNames(ch);
-        int vis = ChallengeService.visibleCount(names.size());
+        int vis = ChallengeService.visibleCount(ch, names.size());
         List<String> out = new ArrayList<>();
         for (int i = 0; i < names.size(); i++) out.add(i < vis ? names.get(i) : "Hidden test " + (i - vis + 1));
         return out;
@@ -476,7 +533,7 @@ public class AttemptService {
 
     /** Example tests show name and message; hidden ones only pass/fail, unless the learner revealed them. */
     private static List<Map<String, Object>> maskTests(List<RunResult.TestResult> tests, Challenge ch, Attempt a) {
-        int vis = ChallengeService.visibleCount(Math.max(tests.size(), ChallengeService.testNames(ch).size()));
+        int vis = ChallengeService.visibleCount(ch, Math.max(tests.size(), ChallengeService.testNames(ch).size()));
         Set<Integer> shown = revealed(a);
         List<Map<String, Object>> out = new ArrayList<>();
         for (int i = 0; i < tests.size(); i++) {
@@ -506,7 +563,7 @@ public class AttemptService {
         if (a.submittedAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt is already submitted");
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
         List<String> names = ChallengeService.testNames(ch);
-        int vis = ChallengeService.visibleCount(names.size());
+        int vis = ChallengeService.visibleCount(ch, names.size());
         if (index < vis || index >= names.size()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Not a hidden test");
         Set<Integer> shown = revealed(a);
         shown.add(index);

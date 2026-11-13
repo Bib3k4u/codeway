@@ -31,6 +31,9 @@ public class Attempt {
     public Instant lastActiveAt;
     /** Redo of an earlier challenge from the learner's history: graded, but mastery is not changed. */
     public Boolean practice;
+    /** Guided challenges: tries at the diagnose question, and whether it is done (right, or answer shown after 2 tries). */
+    public Integer quizTries;
+    public Boolean quizSolved;
     /** Time on the clock when the attempt was submitted (start shifts forward over breaks between sessions). */
     public Integer elapsedSeconds;
     /** How often the learner restarted the clock on this attempt. */

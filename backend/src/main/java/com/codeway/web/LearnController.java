@@ -17,6 +17,7 @@ public class LearnController {
     public record HintReq(Map<String, String> files, String failures) {}
     public record DraftReq(Map<String, String> files) {}
     public record RevealReq(Integer index) {}
+    public record QuizReq(String option) {}
     public record TelemetryReq(List<AttemptService.Event> events) {}
 
     private final ConceptCatalog catalog;
@@ -96,6 +97,12 @@ public class LearnController {
     @PostMapping("/attempts/{id}/hint")
     public Map<String, Object> hint(HttpServletRequest req, @PathVariable Long id, @RequestBody HintReq b) {
         return attempts.hint(uid(req), id, b.files(), b.failures());
+    }
+
+    /** Answer the diagnose question of a guided challenge. */
+    @PostMapping("/attempts/{id}/quiz")
+    public Map<String, Object> quiz(HttpServletRequest req, @PathVariable Long id, @RequestBody QuizReq b) {
+        return attempts.answerQuiz(uid(req), id, b.option());
     }
 
     /** Reveal one hidden test of an open attempt (costs a little mastery). */

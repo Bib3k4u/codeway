@@ -26,6 +26,14 @@ public class ChallengeService {
         this.challenges = challenges; this.attempts = attempts; this.runner = runner; this.ai = ai; this.catalog = catalog;
     }
 
+    /** Adds the five principle options and our answer key to a guide that only has the question and explanation. */
+    public static String normalizeGuide(String guideJson, String concept) { return GuidedPrompts.normalize(guideJson, concept); }
+
+    /** The guide of a guided challenge, or null. */
+    public static JsonNode guide(Challenge ch) {
+        try { return ch.guideJson == null ? null : Json.M.readTree(ch.guideJson); } catch (Exception e) { return null; }
+    }
+
     /** Several challenges in one query, keyed by id (instead of one lookup per attempt). */
     public static Map<Long, Challenge> byId(ChallengeRepo repo, Collection<Long> ids) {
         Map<Long, Challenge> out = new HashMap<>();
@@ -52,7 +60,14 @@ public class ChallengeService {
         var exact = unseen.stream().filter(c -> c.difficulty == difficulty && c.scaffolding.equals(scaffolding)).findFirst();
         if (exact.isPresent()) return exact.get();
 
-        if (ai.isConfigured()) {
+        boolean guided = catalog.isGuided(concept);
+        // Guided (pattern) challenges grow from a hand-written anchor scenario: first the anchor itself in the learner's
+        // language, then fresh AI variants of it (new domain, new twist), each validated like the anchor and shared.
+        if (guided && bank.isEmpty() && !"java".equals(language)) {
+            var anchor = anchor(concept);
+            if (anchor.isPresent()) { Challenge t = inLanguage(anchor.get(), language); if (t != null) return t; }
+        }
+        if (ai.isConfigured() && !(guided && bank.isEmpty())) {
             Challenge g = generate(language, concept, difficulty, scaffolding, bank);
             if (g != null) return g;
         }
@@ -67,15 +82,29 @@ public class ChallengeService {
                         "No challenges are ready for this concept yet. Please try again later, or pick another concept."));
     }
 
+    /** The hand-written Java scenario a guided concept's variants are modelled on. */
+    Optional<Challenge> anchor(String concept) {
+        return challenges.findByLanguageAndConceptAndValidatedTrue("java", concept).stream().filter(c -> "seed-pattern".equals(c.origin)).findFirst();
+    }
+
     // ---- generation ----
     Challenge generate(String language, String concept, int difficulty, String scaffolding, List<Challenge> bank) {
         var c = catalog.find(language, concept).orElseThrow();
         String avoid = bank.stream().map(x -> x.title).collect(Collectors.joining("; "));
+        Optional<Challenge> anchor = catalog.isGuided(concept) ? anchor(concept) : Optional.empty();
+        if (catalog.isGuided(concept) && anchor.isEmpty()) return null;
         for (int attempt = 1; attempt <= MAX_GENERATION_TRIES; attempt++) {
             try {
                 Lang lang = Lang.of(language);
-                String raw = ai.chat(ai.model(), system(lang), userPrompt(lang, c, difficulty, scaffolding, avoid), true);
+                String prompt = anchor.isPresent() ? GuidedPrompts.variant(lang, c, difficulty, scaffolding, avoid, anchor.get(), langRules(lang))
+                        : userPrompt(lang, c, difficulty, scaffolding, avoid);
+                String raw = ai.chat(ai.model(), system(lang), prompt, true);
                 Challenge ch = parse(raw, language, concept, difficulty, scaffolding);
+                if (anchor.isPresent()) {
+                    if (ch.guideJson == null) throw new IllegalStateException("missing guide");
+                    ch.guideJson = GuidedPrompts.normalize(ch.guideJson, concept);   // our quiz options and answer key
+                    ch.familyId = null;
+                }
                 String problem = validate(ch);
                 if (problem == null) {
                     ch.validated = true;
@@ -110,6 +139,7 @@ public class ChallengeService {
                 String raw = ai.chat(ai.model(), system(lang), translatePrompt(src, lang), true);
                 Challenge ch = parse(raw, language, src.concept, src.difficulty, src.scaffolding);
                 ch.expectedMinutes = src.expectedMinutes;
+                ch.guideJson = src.guideJson;               // quiz, steps and reveal are language-neutral
                 String problem = validate(ch);
                 if (problem == null) {
                     ch.validated = true; ch.origin = "ai-translation"; ch.familyId = fam;
@@ -146,7 +176,11 @@ public class ChallengeService {
                 - Include %5$s in starterFiles and referenceSolution; tests is a single file %6$s.
                 - The starter must NOT pass the tests; the reference solution must pass all of them.
                 - descriptionMd keeps the same sections; its Example block must be exactly what the reference %5$s prints.
-                """.formatted(Lang.of(src.language).label, lang.label, Json.write(source), langRules(lang), lang.mainFile, lang.testFile);
+                """.formatted(Lang.of(src.language).label, lang.label, Json.write(source), langRules(lang), lang.mainFile, lang.testFile)
+                + (src.guideJson == null ? "" : """
+                - Keep EVERY test name exactly as in the source, including its "Guard:" or "S1:", "S2:"... prefix and order. The starter is
+                  WORKING code: it must pass all "Guard:" tests, and keep the new empty types the step tests refer to (as stubs with TODOs).
+                """);
     }
 
     /** Index just past the statement starting at {@code start}: where its parentheses balance again. */
@@ -171,13 +205,16 @@ public class ChallengeService {
     /** How many tests (the first ones) are shown as worked examples; the rest stay hidden until revealed. */
     public static int visibleCount(int total) { return total <= 1 ? total : Math.max(1, Math.min(3, total / 2)); }
 
+    /** Guided challenges have no hidden tests: the tests are the steps, and all of them can be read. */
+    public static int visibleCount(Challenge ch, int total) { return ch != null && ch.guideJson != null ? total : visibleCount(total); }
+
     /**
      * Source snippets of the visible tests, so learners can read what is checked. For Java, JavaScript and C++ a test
      * is its run(...) call and the lambda after it; in Python a test may use a helper def written above the call.
      */
     public static List<Map<String, String>> examples(Challenge ch) {
         List<String> names = testNames(ch);
-        int n = visibleCount(names.size());
+        int n = visibleCount(ch, names.size());
         Lang lang = Lang.of(ch.language);
         String src = Json.files(ch.testsJson).getOrDefault(lang.testFile, "");
         String[] lines = src.split("\n", -1);
@@ -226,6 +263,15 @@ public class ChallengeService {
         ch.testNamesJson = Json.write(good.tests().stream().map(RunResult.TestResult::name).toList());
         RunResult start = runner.run(lang.id, starterWithMain(lang.id, starter), tests, CodeRunner.Mode.TESTS);
         if (start.allPassed()) return "starter already passes all tests";
+        if (ch.guideJson != null) {
+            String bad = GuidedPrompts.checkGuide(ch.guideJson, good.tests().stream().map(RunResult.TestResult::name).toList());
+            if (bad != null) return bad;
+            if (!start.compiled()) return "starter does not compile: " + start.diagnostics();
+            // the starter is working code: every Guard test must already pass, and step 1 must still be to do
+            var brokenGuards = start.tests().stream().filter(t -> t.name().startsWith("Guard:") && !t.passed()).map(RunResult.TestResult::name).toList();
+            if (!brokenGuards.isEmpty()) return "starter breaks guard tests: " + brokenGuards;
+            if (start.tests().stream().noneMatch(t -> t.name().startsWith("S1:") && !t.passed())) return "step 1 tests already pass on the starter";
+        }
         return null;
     }
 
@@ -347,6 +393,7 @@ public class ChallengeService {
         ch.testsJson = Json.write(Json.M.convertValue(n.path("tests"), Map.class));
         ch.referenceSolutionJson = Json.write(Json.M.convertValue(n.path("referenceSolution"), Map.class));
         ch.hintsJson = Json.write(Json.M.convertValue(n.path("hints"), List.class));
+        if (n.path("guide").isObject()) ch.guideJson = Json.write(Json.M.convertValue(n.path("guide"), Map.class));
         if (ch.title.isBlank() || ch.descriptionMd.isBlank()) throw new IllegalStateException("missing title/description");
         return ch;
     }

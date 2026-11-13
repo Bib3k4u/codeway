@@ -21,6 +21,14 @@ public class Challenge {
     @Column(columnDefinition = "text") public String testNamesJson;      // ["name", ...] as the reference run reported them
     /** Same exercise in other languages shares a family: the id of the challenge it was translated from. */
     public Long familyId;
+    /**
+     * Guided challenges (design patterns): {"quiz": {question, options[{id,text}], answers[], explanation},
+     * "steps": [{title, md}], "reveal": {pattern, principle, roles[], summary}}. Test names are prefixed
+     * "Guard:" (behaviour that must never break) or "S1:", "S2:"... (the steps). Null for ordinary challenges.
+     */
+    @Column(columnDefinition = "text") public String guideJson;
+    /** Hash of a seeded challenge's content, so an edited seed is re-validated and updated in place. */
+    public String contentHash;
     public boolean validated = false;
     public String origin;           // seed | ai
     public Instant createdAt = Instant.now();
