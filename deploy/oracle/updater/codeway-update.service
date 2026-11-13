@@ -1,0 +1,8 @@
+[Unit]
+Description=Install the latest Codeway backend build from GitHub releases
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/codeway/codeway-update.sh

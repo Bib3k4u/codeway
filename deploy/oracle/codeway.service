@@ -1,0 +1,20 @@
+[Unit]
+Description=Codeway backend (Spring Boot)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=codeway
+Group=codeway
+WorkingDirectory=/opt/codeway
+EnvironmentFile=/opt/codeway/codeway.env
+# 12 GB machine: a roomier heap than on the 1 GB AWS instance. Run temp dirs live under /opt/codeway/tmp so the
+# Docker daemon can mount them (don't enable PrivateTmp: the daemon would not see a private /tmp).
+ExecStart=/usr/bin/java -Xms256m -Xmx1536m -XX:+UseSerialGC -Djava.io.tmpdir=/opt/codeway/tmp -jar /opt/codeway/codeway-backend.jar
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

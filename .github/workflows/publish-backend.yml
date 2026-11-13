@@ -1,0 +1,52 @@
+# Build, test and publish the backend as the GitHub release "backend-latest" (jar + sha256 + commit).
+# The Oracle server's updater (deploy/oracle/updater) checks that release every 2 minutes and installs new builds,
+# with a health check and rollback. No secrets and no inbound access to the server are needed.
+#
+# While the backend still runs on AWS this only runs when started by hand (Actions > Publish backend > Run).
+# At the Oracle cutover, add the push trigger below and remove deploy-backend.yml.
+name: Publish backend
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [master]
+  #   paths:
+  #     - "backend/**"
+  #     - "deploy/ec2/sandbox/**"
+  #     - ".github/workflows/publish-backend.yml"
+
+permissions:
+  contents: write   # create the release
+
+concurrency:
+  group: publish-backend
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build and test
+        working-directory: backend
+        run: mvn -B -q package
+
+      - name: Publish release backend-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          cp backend/target/codeway-backend-*.jar dist/codeway-backend.jar
+          (cd dist && sha256sum codeway-backend.jar > codeway-backend.jar.sha256)
+          gh release delete backend-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create backend-latest dist/codeway-backend.jar dist/codeway-backend.jar.sha256 \
+            --target "$GITHUB_SHA" --title "Backend build ${GITHUB_SHA::7}" --notes "$GITHUB_SHA" --prerelease --latest=false
+          echo "Published $(cut -d' ' -f1 dist/codeway-backend.jar.sha256) for $GITHUB_SHA"
