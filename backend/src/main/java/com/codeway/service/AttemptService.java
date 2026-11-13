@@ -5,6 +5,7 @@ import com.codeway.domain.*;
 import com.codeway.repo.*;
 import com.codeway.runner.*;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -22,6 +23,8 @@ public class AttemptService {
     private final CodeRunner runner;
     private final AiClient ai;
     private final ConceptCatalog catalog;
+    /** Hints per learner per rolling hour. */
+    @Value("${codeway.hints.per-hour:5}") private int hintsPerHour = 5;
 
     public AttemptService(AttemptRepo attempts, ChallengeRepo challenges, EventRepo events, ChallengeService challengeService,
                           MasteryService mastery, CodeRunner runner, AiClient ai, ConceptCatalog catalog) {
@@ -119,6 +122,7 @@ public class AttemptService {
         out.put("mastery", masteryView(m));
         out.put("practice", a.isPractice());
         out.put("revealed", revealed(a));
+        out.put("hintQuota", hintQuota(a.userId).view());
         out.put("startedAt", a.startedAt.toString());
         out.put("serverNow", Instant.now().toString());
         out.putAll(timeRecord(a.userId, ch.id, a.id));
@@ -308,6 +312,12 @@ public class AttemptService {
     public Map<String, Object> hint(Long userId, Long attemptId, Map<String, String> files, String lastFailures) {
         Attempt a = owned(userId, attemptId);
         if (a.submittedAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt is already submitted");
+        HintQuota quota = hintQuota(userId);
+        if (quota.left() <= 0) {
+            long minutes = Math.max(1, (quota.resetSeconds() + 59) / 60);
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "You've used your " + quota.limit() + " hints for this hour. The next one opens in " + minutes + " min.");
+        }
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
         int level = Math.min(4, a.hintsUsed + 1);
         a.hintsUsed = level;
@@ -319,7 +329,28 @@ public class AttemptService {
         shown.add(out);
         a.hintsJson = Json.write(shown);
         attempts.save(a);
-        return out;
+        Map<String, Object> resp = new LinkedHashMap<>(out);      // the stored copy stays free of the (changing) allowance
+        resp.put("quota", hintQuota(userId).view());
+        return resp;
+    }
+
+    // ---- hint allowance ----
+    public record HintQuota(int limit, int used, int left, long resetSeconds) {
+        Map<String, Object> view() { return Map.of("limit", limit, "used", used, "left", left, "resetSeconds", resetSeconds); }
+    }
+
+    /** Hints used in the last hour, and (when none are left) how long until the oldest one drops out of the hour. */
+    static HintQuota quotaFrom(List<Instant> times, int limit, Instant now) {
+        Instant since = now.minus(Duration.ofHours(1));
+        List<Instant> inWindow = times.stream().filter(t -> t.isAfter(since)).sorted().toList();
+        int used = inWindow.size();
+        long reset = limit > 0 && used >= limit ? Math.max(1, Duration.between(now, inWindow.get(used - limit).plus(Duration.ofHours(1))).toSeconds()) : 0;
+        return new HintQuota(limit, used, Math.max(0, limit - used), reset);
+    }
+
+    HintQuota hintQuota(Long userId) {
+        Instant now = Instant.now();
+        return quotaFrom(events.hintTimesSince(userId, now.minus(Duration.ofHours(1))), hintsPerHour, now);
     }
 
     private Map<String, Object> hintView(Challenge ch, int level, Map<String, String> files, String lastFailures) {
@@ -370,8 +401,12 @@ public class AttemptService {
     // ---- telemetry ----
     public record Event(Long attemptId, String type, JsonNode payload) {}
 
+    /** The only event types the browser may log. Others (hint, run, reveal) are logged by the server, and counted from there. */
+    private static final Set<String> CLIENT_EVENTS = Set.of("first_keystroke", "churn");
+
     public void telemetry(Long userId, List<Event> batch) {
         for (Event e : batch) {
+            if (!CLIENT_EVENTS.contains(e.type())) continue;
             Attempt a = owned(userId, e.attemptId());
             EventLog log = new EventLog();
             log.attemptId = a.id; log.type = e.type();

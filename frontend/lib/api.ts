@@ -19,7 +19,7 @@ export interface StartResp extends TimeRecord {
   attemptId: number; challenge: Challenge; mastery: MasteryView;
   resumed: boolean; draft?: Files; hints?: Hint[]; lastRun?: RunResp; startedAt?: string;
   /** redo of a past challenge: graded, mastery unchanged */
-  practice?: boolean; revealed?: number[];
+  practice?: boolean; revealed?: number[]; hintQuota?: HintQuota;
   /** clock: the attempt's start (moves forward over breaks) and the server's time, to correct for a skewed device clock */
   serverNow?: string;
 }
@@ -66,7 +66,9 @@ export interface AttemptDetail {
   attemptId: number; files: Files; passed: number; total: number; delta: number; practice: boolean; submittedAt: string | null;
   challenge: { id: number; title: string; descriptionMd: string; language: string; concept: string; difficulty: number };
 }
-export interface Hint { level: number; maxLevel: number; kind: "nudge" | "concept" | "code" | "solution"; text: string; cost: string; files?: Files }
+/** Hints a learner may still ask for in the current rolling hour. */
+export interface HintQuota { limit: number; used: number; left: number; resetSeconds: number }
+export interface Hint { level: number; maxLevel: number; kind: "nudge" | "concept" | "code" | "solution"; text: string; cost: string; files?: Files; quota?: HintQuota }
 
 /**
  * Supabase access token for API calls. getSession() returns the stored session and refreshes it first when it is

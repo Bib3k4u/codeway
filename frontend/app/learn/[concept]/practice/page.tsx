@@ -16,13 +16,16 @@ import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, saveDraftOnExit, type Files, type Hint, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, ApiError, saveDraftOnExit, type Files, type Hint, type HintQuota, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
 import { duration } from "@/lib/time";
 
 type Busy = null | "main" | "tests" | "submit" | "hint";
+/** Hints left this hour; `resetAt` (ms) is when a slot opens again, once none are left. */
+type QuotaState = { limit: number; left: number; resetAt: number | null };
+const quotaState = (q?: HintQuota): QuotaState | null => (q ? { limit: q.limit, left: q.left, resetAt: q.left <= 0 ? Date.now() + q.resetSeconds * 1000 : null } : null);
 const hintNames = ["Nudge", "Concept", "Partial code", "Solution"];
 
 /** Picks the language: ?lang= in the URL, else the one this learner last chose, else Java. */
@@ -53,6 +56,9 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const [left, setLeft] = useState<"brief" | "hints">("brief");
   const [bottom, setBottom] = useState<"console" | "tests">("console");
   const [hints, setHints] = useState<Hint[]>([]);
+  const [hintQuota, setHintQuota] = useState<QuotaState | null>(null);
+  const [hintNote, setHintNote] = useState("");
+  const [now, setNow] = useState(() => Date.now());
   const [sheet, setSheet] = useState<null | "result" | "retry">(null);
   const [retry, setRetry] = useState<SubmitResp | null>(null);
   const [confirmReset, setConfirmReset] = useState<null | "file" | "all">(null);
@@ -164,7 +170,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
         saved.current = initial;
-        setStart(r); setFiles(initial);
+        setStart(r); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
         const names = Object.keys(initial);
         const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
         setOpen([first]); setActive(first);
@@ -229,7 +235,17 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       const failures = run?.tests.filter((t) => !t.passed).map((t) => `${t.name}: ${t.message}`).join("\n");
       const h = await api<Hint>(`/attempts/${attemptId}/hint`, { files, failures });
       setHints((x) => [...x, h]);
-    } catch (e) { setError((e as Error).message); }
+      setHintNote("");
+      if (h.quota) setHintQuota(quotaState(h.quota));
+    } catch (e) {
+      const msg = (e as Error).message;
+      setHintNote(msg);                                  // shown in the Hints tab (the page-level error isn't visible here)
+      if (e instanceof ApiError && e.status === 429) {   // hourly allowance used up: the message says how long until the next one
+        const mins = /(\d+) min/.exec(msg);
+        setHintQuota((q) => ({ limit: q?.limit ?? 5, left: 0, resetAt: Date.now() + (mins ? Number(mins[1]) : 60) * 60_000 }));
+        setNow(Date.now());
+      }
+    }
     finally { setBusy(null); }
   }
 
@@ -297,11 +313,19 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
 
   const endParty = useCallback(() => setParty(false), []);
   const diagnostics = run?.diagnostics ?? [];
-  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setStart(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
   const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
   const [deleting, setDeleting] = useState<string | null>(null);
   const hintLevel = hints.length;
+  // with no hints left, tick so the button comes back by itself when a slot opens
+  useEffect(() => {
+    if (!hintQuota || hintQuota.left > 0) return;
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, [hintQuota]);
+  const hintsBlocked = !!hintQuota && hintQuota.left <= 0 && (hintQuota.resetAt ?? 0) > now;
+  const hintMins = hintQuota?.resetAt ? Math.max(1, Math.ceil((hintQuota.resetAt - now) / 60_000)) : 0;
 
   if (error && !start) {
     return (
@@ -352,12 +376,16 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               <button role="tab" className="ptab" aria-selected={left === "brief"} onClick={() => setLeft("brief")}>Brief</button>
               <button role="tab" className="ptab" aria-selected={left === "hints"} onClick={() => setLeft("hints")}>Hints{hintLevel > 0 && <span className="chip !h-[18px] !px-1.5 !text-[10px]">{hintLevel}</span>}</button>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={getHint} disabled={busy !== null || hintLevel >= 4}
-              title={hintLevel >= 3 ? "Shows the full solution and lowers mastery" : "Opt-in help. Costs a little mastery"}>
+            <button className="btn btn-secondary btn-sm" onClick={getHint} disabled={busy !== null || hintLevel >= 4 || hintsBlocked}
+              title={hintsBlocked ? `You've used your ${hintQuota?.limit ?? 5} hints for this hour` : hintLevel >= 3 ? "Shows the full solution and lowers mastery" : "Opt-in help. Costs a little mastery"}>
               {busy === "hint" ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
-              {hintLevel >= 4 ? "No more hints" : hintLevel === 3 ? "Show solution" : "Need a hint?"}
+              {hintLevel >= 4 ? "No more hints" : hintsBlocked ? `Hints reset in ${hintMins} min` : hintLevel === 3 ? "Show solution" : "Need a hint?"}
+              {hintQuota && !hintsBlocked && hintLevel < 4 && <span className="chip !h-[18px] !px-1.5 !text-[10px] tabular-nums" title="Hints left this hour">{hintQuota.left}/{hintQuota.limit}</span>}
             </button>
           </div>
+          {left === "hints" && hintNote && (
+            <p role="status" className="mx-6 mt-4 rounded-xl px-3.5 py-2.5 text-[13px] leading-snug text-warn" style={{ background: "var(--orange-soft)" }}>{hintNote}</p>
+          )}
           <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
             {left === "brief" ? (
               <>
@@ -391,7 +419,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                 <div className="mt-10 text-center text-sm text-label2">
                   <Lightbulb className="mx-auto mb-3 text-warn" size={28} />
                   <p className="mb-1 font-medium text-label">Try first, hint second.</p>
-                  <p>Hints escalate: nudge, concept, partial code, solution. Each one lowers what this attempt earns.</p>
+                  <p>Hints escalate: nudge, concept, partial code, solution. Each one lowers what this attempt earns, and you get {hintQuota?.limit ?? 5} per hour.</p>
                 </div>
               ) : (
                 <ol className="space-y-4">

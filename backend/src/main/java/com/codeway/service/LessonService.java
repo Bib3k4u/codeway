@@ -4,7 +4,11 @@ import com.codeway.ai.AiClient;
 import com.codeway.domain.Lesson;
 import com.codeway.repo.LessonRepo;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataIntegrityViolationException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class LessonService {
@@ -14,14 +18,39 @@ public class LessonService {
 
     public LessonService(LessonRepo repo, AiClient ai, ConceptCatalog catalog) { this.repo = repo; this.ai = ai; this.catalog = catalog; }
 
+    /** Generation is attempted again for a stored plain-text fallback lesson at most this often (per lesson). */
+    static final Duration RETRY_AFTER_FAILURE = Duration.ofMinutes(30);
+    private final Map<String, Object> locks = new ConcurrentHashMap<>();
+    private final Map<String, Instant> lastFailure = new ConcurrentHashMap<>();
+
+    /**
+     * Lessons are the same for everyone, so each (language, concept) is written by the AI at most once and then served
+     * from the database to every learner. Only one request generates a given lesson at a time; the others wait and use
+     * its result instead of calling the AI themselves.
+     */
     public Lesson get(String language, String concept) {
+        String key = language + "/" + concept;
         var existing = repo.findByLanguageAndConcept(language, concept);
-        // Replace a cached fallback once AI becomes available
-        if (existing.isPresent() && !("fallback".equals(existing.get().source) && ai.isConfigured())) return existing.get();
+        if (existing.isPresent() && !needsAi(existing.get(), key)) return existing.get();
         var c = catalog.find(language, concept).orElseThrow(() -> new IllegalArgumentException("Unknown concept"));
-        Lesson l = existing.orElseGet(Lesson::new);
-        l.language = language; l.concept = concept;
-        String md = null; String source = "fallback";
+        synchronized (locks.computeIfAbsent(key, k -> new Object())) {
+            existing = repo.findByLanguageAndConcept(language, concept);   // someone may have finished it while we waited
+            if (existing.isPresent() && !needsAi(existing.get(), key)) return existing.get();
+            return generate(c, language, key, existing.orElse(null));
+        }
+    }
+
+    /** A stored fallback is replaced once AI works, but not on every view: after a failure it waits {@link #RETRY_AFTER_FAILURE}. */
+    private boolean needsAi(Lesson l, String key) {
+        if (!"fallback".equals(l.source) || !ai.isConfigured()) return false;
+        Instant failed = lastFailure.get(key);
+        return failed == null || failed.plus(RETRY_AFTER_FAILURE).isBefore(Instant.now());
+    }
+
+    private Lesson generate(ConceptCatalog.Concept c, String language, String key, Lesson existing) {
+        Lesson l = existing != null ? existing : new Lesson();
+        l.language = language; l.concept = c.id();
+        String md = null;
         if (ai.isConfigured()) {
             try {
                 // Keep lessons consistent across languages: translate an existing one (same story and examples)
@@ -29,23 +58,37 @@ public class LessonService {
                 Lesson from = null;
                 for (String other : ConceptCatalog.LANGUAGES) {
                     if (other.equals(language)) continue;
-                    var o = repo.findByLanguageAndConcept(other, concept).filter(x -> "ai".equals(x.source));
+                    var o = repo.findByLanguageAndConcept(other, c.id()).filter(x -> "ai".equals(x.source));
                     if (o.isPresent() && (from == null || ConceptCatalog.JAVA.equals(other))) from = o.get();
                 }
                 String system = "You are a warm, precise " + ConceptCatalog.label(language) + " instructor writing a short interactive lesson in Markdown. Use ## headings, short paragraphs and runnable code blocks. No preamble.";
                 md = from == null ? ai.chat(ai.model(), system, lessonPrompt(c, language), false)
                         : ai.chat(ai.model(), system, translatePrompt(from, language), false);
-                source = "ai";
+                lastFailure.remove(key);
+            } catch (AiClient.QuotaExceeded q) {
+                // Today's AI allowance is used up: show the plain lesson now but save nothing, so the next learner
+                // (or tomorrow) can still generate the real one.
+                Lesson plain = new Lesson();
+                plain.language = language; plain.concept = c.id(); plain.source = "fallback"; plain.contentMd = fallbackContent(c, language);
+                return plain;
             } catch (Exception e) {
+                lastFailure.put(key, Instant.now());
                 System.err.println("[lesson] AI failed, using fallback: " + e.getMessage());
             }
         }
-        if (md != null) l.contentMd = md;
-        else if (ConceptCatalog.JAVA.equals(language) && FALLBACK.containsKey(concept)) l.contentMd = FALLBACK.get(concept);
-        else l.contentMd = "## " + c.title() + " in " + ConceptCatalog.label(language) + "\n\n" + c.summary()
+        l.source = md != null ? "ai" : "fallback";
+        l.contentMd = md != null ? md : fallbackContent(c, language);
+        try {
+            return repo.save(l);
+        } catch (DataIntegrityViolationException raced) {                 // another server instance saved it first
+            return repo.findByLanguageAndConcept(language, c.id()).orElse(l);
+        }
+    }
+
+    private static String fallbackContent(ConceptCatalog.Concept c, String language) {
+        if (ConceptCatalog.JAVA.equals(language) && FALLBACK.containsKey(c.id())) return FALLBACK.get(c.id());
+        return "## " + c.title() + " in " + ConceptCatalog.label(language) + "\n\n" + c.summary()
                 + "\n\nThe full lesson isn't ready yet. Check back soon.";
-        l.source = source;
-        return repo.save(l);
     }
 
     /** Same lesson in another language: keep headings, story and examples; rewrite only code and language notes. */

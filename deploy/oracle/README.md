@@ -58,6 +58,15 @@ Then:
   `codeway-backups` through a write-only upload URL (`deploy/oracle/backup.env`, git-ignored; expires in a year).
 - Backup now: `sudo bash /opt/codeway/postgres.sh backup`. Restore: `sudo bash /opt/codeway/postgres.sh restore /opt/backups/<file>.dump`.
 
+## AI usage limits
+
+- **Hints:** 5 per learner per rolling hour (`HINTS_PER_HOUR`), counted in the database so restarts don't reset it. The sixth
+  is refused before any AI call, with the minutes until the next one opens. The browser can't log hint events itself.
+- **Lessons:** written by the AI at most once per concept and language, then served to everyone from the database. Other
+  languages are translated from an existing lesson. Concurrent first views share one generation; a failed generation isn't
+  retried for 30 minutes; if today's AI allowance is used up nothing is saved, so the real lesson can still be generated later.
+- **Per-user and app-wide daily AI caps** (`AI_DAILY_USER_LIMIT`, `AI_DAILY_GLOBAL_LIMIT`) still apply to everything.
+
 ## Sandbox and disk safety
 
 - **Sandbox:** every run is a throwaway container: no network, read-only system files, no Linux capabilities, non-root,

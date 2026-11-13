@@ -25,7 +25,7 @@ public class AiClient {
 
     /** Thrown instead of calling the model when today's AI cap is used up; callers fall back as for any AI failure. */
     public static class QuotaExceeded extends IllegalStateException {
-        QuotaExceeded(String m) { super(m); }
+        public QuotaExceeded(String m) { super(m); }
     }
 
     public boolean isConfigured() {
