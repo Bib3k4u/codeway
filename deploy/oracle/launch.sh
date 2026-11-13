@@ -120,14 +120,15 @@ if [ -z "$id" ]; then
   [ -n "$img" ] || die "No Ubuntu 24.04 ARM image found"
   for ad in $(q iam availability-domain list --compartment-id "$T" --query 'data[].name' --raw-output | tr -d '[]",'); do
     say "Trying $ad"
-    if out="$(oci compute instance launch --compartment-id "$T" --availability-domain "$ad" --display-name "$NAME" \
+    if out="$(oci compute instance launch --no-retry --compartment-id "$T" --availability-domain "$ad" --display-name "$NAME" \
          --shape VM.Standard.A1.Flex --shape-config "{\"ocpus\":$OCPUS,\"memoryInGBs\":$MEM_GB}" \
          --image-id "$img" --boot-volume-size-in-gbs "$BOOT_GB" --subnet-id "$sn" --assign-public-ip true \
          --metadata "{\"ssh_authorized_keys\":\"$(cat "$KEY_FILE.pub")\"}" --wait-for-state RUNNING --query 'data.id' --raw-output 2>&1)"; then
       id="$(echo "$out" | tail -1)"; break
     fi
-    echo "$out" | grep -qi "capacity" && { say "No free ARM capacity in $ad"; continue; }
-    die "Launch failed: $(echo "$out" | tail -3)"
+    # out of capacity, or rate-limited while trying: both just mean "try again later"
+    echo "$out" | grep -qiE "capacity|TooManyRequests|\"status\": 429" && { say "No free ARM capacity in $ad"; continue; }
+    die "Launch failed: $(echo "$out" | grep -E '"code"|"message"|"status"' | tr -s ' ' | tr '\n' ' ')"
   done
   [ -n "$id" ] || die "No free ARM capacity in any availability domain right now. Try again in a while (it frees up often)."
   say "Launched $NAME ($OCPUS OCPU, ${MEM_GB} GB, Ubuntu 24.04 ARM)"
