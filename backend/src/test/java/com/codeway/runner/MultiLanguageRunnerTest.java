@@ -142,4 +142,18 @@ class MultiLanguageRunnerTest {
         assertFalse(cpp.check().argv().contains("main.cpp"), "learner main() must not be linked with the test main()");
         assertTrue(cpp.check().argv().contains("test_main.cpp"));
     }
+
+    @Test void sandboxCommandIsLockedDown() {
+        var dir = java.nio.file.Path.of("/opt/codeway/tmp/run-1");
+        var plain = DockerRunner.dockerCommand("docker", "", "cw-x", "512m", "1.0", dir, "img");
+        for (String flag : java.util.List.of("--network", "none", "--read-only", "--cap-drop", "ALL", "no-new-privileges", "65534:65534",
+                "fsize=33554432:33554432", "core=0", "--pids-limit", "--memory-swap"))
+            assertTrue(plain.contains(flag), flag + " missing in " + plain);
+        assertFalse(plain.contains("--runtime"), "default runtime unless configured");
+        assertFalse(plain.contains("--privileged"));
+        var gv = DockerRunner.dockerCommand("docker", " runsc ", "cw-x", "512m", "1.0", dir, "img");
+        assertEquals("runsc", gv.get(gv.indexOf("--runtime") + 1));
+        assertEquals("/opt/codeway/tmp/run-1:/work", gv.get(gv.indexOf("-v") + 1));
+        assertTrue(gv.indexOf("--runtime") < gv.indexOf("img"), "runtime option must come before the image");
+    }
 }

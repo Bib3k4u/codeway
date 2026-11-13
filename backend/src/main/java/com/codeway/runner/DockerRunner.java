@@ -32,6 +32,8 @@ public class DockerRunner implements CodeRunner {
     @Value("${codeway.runner.memory:512m}") private String memory;
     @Value("${codeway.runner.cpus:1.0}") private String cpus;
     @Value("${codeway.runner.docker:docker}") private String docker;
+    /** Container runtime: empty = Docker's default (runc); "runsc" = gVisor, a user-space kernel (see deploy/oracle/gvisor.sh). */
+    @Value("${codeway.runner.runtime:}") private String runtime;
 
     private Semaphore slots;
 
@@ -56,11 +58,7 @@ public class DockerRunner implements CodeRunner {
             openUp(dir); // the container runs as nobody (65534) and must be able to write into /work
 
             String name = "cw-" + UUID.randomUUID().toString().substring(0, 12);
-            List<String> cmd = List.of(docker, "run", "--rm", "--name", name,
-                    "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,exec,size=64m",
-                    "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--pids-limit", "128",
-                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "65534:65534",
-                    "-e", "HOME=/tmp", "-v", dir.toAbsolutePath() + ":/work", "-w", "/work/src", image, "sh", "/work/run.sh");
+            List<String> cmd = dockerCommand(docker, runtime, name, memory, cpus, dir, image);
             LocalRunner.Proc proc = LocalRunner.exec(cmd, dir, Map.of(), CONTAINER_TIMEOUT_S);
             if (proc.timedOut()) LocalRunner.exec(List.of(docker, "kill", name), dir, Map.of(), 10);
 
@@ -77,8 +75,14 @@ public class DockerRunner implements CodeRunner {
                 return new RunResult(false, diags, "", "", List.of(), check == 137, check, System.currentTimeMillis() - t0);
             }
             Path runCode = dir.resolve("run.code");
-            if (!Files.exists(runCode))
+            if (!Files.exists(runCode)) {
+                // The script writes run.code after the program ends. If the entry point exists but there is no exit code,
+                // the whole container was killed (out of memory, too many processes): say so, rather than "missing entry".
+                if (Files.exists(dir.resolve(plan.entry())))
+                    return RunSupport.result(lang, p, mode, diags, RunSupport.read(dir.resolve("run.out")), RunSupport.read(dir.resolve("run.err")),
+                            true, 137, RUN_TIMEOUT_S, "/work/src/", t0);
                 return new RunResult(true, diags, "", plan.noEntryMsg(), List.of(), false, 1, System.currentTimeMillis() - t0);
+            }
             int exit = Integer.parseInt(Files.readString(runCode).trim());
             boolean timedOut = exit == 137 || proc.timedOut(); // SIGKILL from `timeout`
             return RunSupport.result(lang, p, mode, diags, RunSupport.read(dir.resolve("run.out")), RunSupport.read(dir.resolve("run.err")),
@@ -92,6 +96,23 @@ public class DockerRunner implements CodeRunner {
             if (dir != null) RunSupport.deleteQuietly(dir);
             if (acquired) slots.release();
         }
+    }
+
+    /**
+     * The sandbox: no network, read-only system files, no Linux capabilities, a non-root user, no privilege gain, and
+     * limits on memory, CPU, processes and the size of any file a program writes (32 MB, so printing or writing in a
+     * loop can't fill the disk; run folders also live on a size-limited disk, see deploy/oracle/harden.sh).
+     */
+    static List<String> dockerCommand(String docker, String runtime, String name, String memory, String cpus, Path dir, String image) {
+        List<String> c = new ArrayList<>(List.of(docker, "run", "--rm", "--name", name));
+        if (runtime != null && !runtime.isBlank()) c.addAll(List.of("--runtime", runtime.trim()));
+        c.addAll(List.of(
+                "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,exec,size=64m",
+                "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--pids-limit", "128",
+                "--ulimit", "fsize=33554432:33554432", "--ulimit", "core=0", "--ulimit", "nofile=1024:1024",
+                "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "65534:65534",
+                "-e", "HOME=/tmp", "-v", dir.toAbsolutePath() + ":/work", "-w", "/work/src", image, "sh", "/work/run.sh"));
+        return c;
     }
 
     /** The container's script: check (compile / syntax), then run the entry point if it exists. */

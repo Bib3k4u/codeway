@@ -13,7 +13,7 @@ JAR="$(ls "$ROOT"/backend/target/codeway-backend-*.jar | head -1)"
 
 echo "==> Uploading"
 "${SSH[@]}" "$HOST" 'rm -rf /tmp/codeway-deploy && mkdir -p /tmp/codeway-deploy'
-"${SCP[@]}" -r "$ROOT"/deploy/oracle/{setup.sh,postgres.sh,codeway.service,caddy-host.sh,codeway-caddy-host.service,codeway.env.example,updater} \
+"${SCP[@]}" -r "$ROOT"/deploy/oracle/{setup.sh,harden.sh,gvisor.sh,postgres.sh,codeway.service,caddy-host.sh,codeway-caddy-host.service,codeway.env.example,updater} \
   "$ROOT/deploy/ec2/sandbox" "$HOST":/tmp/codeway-deploy/
 "${SCP[@]}" "$JAR" "$HOST":/tmp/codeway-deploy/codeway-backend.jar
 "${SCP[@]}" "$ROOT/deploy/oracle/codeway.env" "$HOST":/tmp/codeway-deploy/codeway.env

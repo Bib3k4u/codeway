@@ -47,7 +47,7 @@ install -m 644 "$KIT/codeway-caddy-host.service" /etc/systemd/system/codeway-cad
 touch /opt/caddy/Caddyfile
 if ! docker inspect caddy >/dev/null 2>&1; then
   docker pull -q caddy:2.11.7 >/dev/null
-  docker run -d --name caddy --restart unless-stopped --network host --memory 256m \
+  docker run -d --name caddy --restart unless-stopped --network host --memory 256m --log-opt max-size=10m --log-opt max-file=3 \
     -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2.11.7 >/dev/null
 fi
 
@@ -57,6 +57,10 @@ install -m 644 "$KIT/updater/codeway-update.service" /etc/systemd/system/codeway
 install -m 644 "$KIT/updater/codeway-update.timer" /etc/systemd/system/codeway-update.timer
 
 systemctl daemon-reload
+echo "==> Hardening: size-limited run folders, capped logs, cleanup, security updates"
+bash "$KIT/harden.sh"
+echo "==> gVisor sandbox runtime"
+[ -x /opt/gvisor/runsc ] || bash "$KIT/gvisor.sh"
 systemctl enable codeway codeway-caddy-host.service codeway-update.timer >/dev/null 2>&1
 systemctl start codeway-update.timer
 bash /opt/caddy/caddy-host.sh

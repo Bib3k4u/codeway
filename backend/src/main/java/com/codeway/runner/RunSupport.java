@@ -73,7 +73,7 @@ final class RunSupport {
             for (int i = results.size(); i < p.expectedTests(); i++)
                 results.add(new TestResult("Test " + (i + 1), false, timedOut ? "Did not finish: time limit exceeded" : "Did not run: the program stopped early"));
         String err = tidyStderr(lang, stderr, srcPrefix);
-        if (timedOut) err = (err + "\nTime limit exceeded (" + runLimitS + "s)").trim();
+        if (timedOut) err = (err + "\nStopped: the program ran longer than " + runLimitS + "s or used too much memory.").trim();
         else if (lang == Lang.CPP && exit == 139) err = (err + "\nThe program crashed (segmentation fault): check for null pointers and out-of-range access.").trim();
         return new RunResult(true, warnings, clean.toString().stripTrailing(), err, results, timedOut, exit, System.currentTimeMillis() - t0);
     }

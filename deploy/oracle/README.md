@@ -58,6 +58,21 @@ Then:
   `codeway-backups` through a write-only upload URL (`deploy/oracle/backup.env`, git-ignored; expires in a year).
 - Backup now: `sudo bash /opt/codeway/postgres.sh backup`. Restore: `sudo bash /opt/codeway/postgres.sh restore /opt/backups/<file>.dump`.
 
+## Sandbox and disk safety
+
+- **Sandbox:** every run is a throwaway container: no network, read-only system files, no Linux capabilities, non-root,
+  no privilege gain, limits on memory (512 MB), CPU, processes (128) and the size of any file a program writes (32 MB),
+  and, with `RUNNER_RUNTIME=runsc`, running on **gVisor** instead of the server's kernel (~1.5x slower, much harder to escape).
+- **Run folders** live on a 2 GB in-memory disk (`/opt/codeway/tmp`), so a program that prints or writes nonstop can't fill
+  the real disk. Tested: infinite printing stops at 32 MB, a file-writing loop is killed at ~470 MB, real disk unchanged.
+- `harden.sh` also caps the journal (300 MB) and Docker logs, cleans stale run folders and containers hourly, logs a warning
+  above 85% disk, applies security updates automatically (reboot at 21:00 UTC only if a kernel update needs it), and
+  switches off rpcbind. All of it runs from `setup.sh`; re-run it by hand with `sudo bash deploy/oracle/harden.sh` (copied to the server) if needed.
+- Billing: the boot volume is a fixed 50 GB (200 GB is free), so a full disk can't raise the bill; it can only stop the service.
+- Turn gVisor off (back to plain Docker): clear `RUNNER_RUNTIME` in `/opt/codeway/codeway.env`, `sudo systemctl restart codeway`.
+- Not covered: learner code and the hidden tests run in the same process, so a determined learner could read the tests or fake
+  passing lines. That only affects their own mastery.
+
 ## Staying free
 
 - Keep the server at 2 OCPUs / 12 GB or less (the Always Free A1 limit since June 2026), and boot volumes within 200 GB.
