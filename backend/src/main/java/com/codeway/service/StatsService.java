@@ -71,9 +71,11 @@ public class StatsService {
         double avgScore = conceptCount == 0 ? 0 : rows.stream().filter(m -> m.attemptsCount > 0).mapToDouble(m -> m.score).sum() / conceptCount;
 
         List<Map<String, Object>> recent = new ArrayList<>();
-        mine.stream().filter(a -> a.submittedAt != null).sorted(Comparator.comparing((Attempt a) -> a.submittedAt).reversed()).limit(8).forEach(a -> {
-            Challenge ch = challenges.findById(a.challengeId).orElse(null);
-            if (ch == null) return;
+        List<Attempt> latest = mine.stream().filter(a -> a.submittedAt != null).sorted(Comparator.comparing((Attempt a) -> a.submittedAt).reversed()).limit(8).toList();
+        Map<Long, Challenge> latestChallenges = ChallengeService.byId(challenges, latest.stream().map(a -> a.challengeId).toList());
+        for (Attempt a : latest) {
+            Challenge ch = latestChallenges.get(a.challengeId);
+            if (ch == null) continue;
             Map<String, Object> r = new LinkedHashMap<>();
             r.put("title", ch.title);
             r.put("concept", ch.concept);
@@ -82,7 +84,7 @@ public class StatsService {
             r.put("delta", AttemptService.round(a.scoreAfter - a.scoreBefore));
             r.put("at", a.submittedAt.toString());
             recent.add(r);
-        });
+        }
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("today", today.toString());

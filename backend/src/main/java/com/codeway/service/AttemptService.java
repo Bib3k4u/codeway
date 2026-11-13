@@ -39,7 +39,8 @@ public class AttemptService {
         ConceptMastery m = mastery.get(userId, language, concept);
         List<Attempt> open = attempts.findByUserIdAndSubmittedAtIsNullOrderByStartedAtDesc(userId);
         Map<Long, Challenge> chOf = new HashMap<>();
-        for (Attempt o : open) challenges.findById(o.challengeId).ifPresent(c -> chOf.put(o.id, c));
+        Map<Long, Challenge> openChallenges = ChallengeService.byId(challenges, open.stream().map(o -> o.challengeId).toList());
+        for (Attempt o : open) { Challenge c = openChallenges.get(o.challengeId); if (c != null) chOf.put(o.id, c); }
 
         // The question the learner is on for this concept is the most recently active open attempt, in any language.
         // Switching language keeps that question: resume it in the new language, or translate it.
@@ -153,8 +154,11 @@ public class AttemptService {
 
     public Set<String> openConcepts(Long userId, String language) {
         Set<String> out = new HashSet<>();
-        for (Attempt a : attempts.findByUserIdAndSubmittedAtIsNullOrderByStartedAtDesc(userId)) {
-            challenges.findById(a.challengeId).filter(c -> c.language.equals(language)).ifPresent(c -> out.add(c.concept));
+        List<Attempt> open = attempts.findByUserIdAndSubmittedAtIsNullOrderByStartedAtDesc(userId);
+        Map<Long, Challenge> byId = ChallengeService.byId(challenges, open.stream().map(a -> a.challengeId).toList());
+        for (Attempt a : open) {
+            Challenge c = byId.get(a.challengeId);
+            if (c != null && c.language.equals(language)) out.add(c.concept);
         }
         return out;
     }
@@ -498,8 +502,7 @@ public class AttemptService {
 
     private List<Map<String, Object>> historyRows(Long userId, HistoryFilter f) {
         List<Attempt> mine = attempts.findByUserIdAndSubmittedAtIsNotNullOrderBySubmittedAtDesc(userId);
-        Map<Long, Challenge> chs = new HashMap<>();
-        for (Attempt a : mine) chs.computeIfAbsent(a.challengeId, id -> challenges.findById(id).orElse(null));
+        Map<Long, Challenge> chs = ChallengeService.byId(challenges, mine.stream().map(a -> a.challengeId).toList());
         // attempt numbers count every submission of a challenge in time order
         Map<Long, Integer> seen = new HashMap<>();
         Map<Long, Integer> number = new HashMap<>();

@@ -26,6 +26,14 @@ public class ChallengeService {
         this.challenges = challenges; this.attempts = attempts; this.runner = runner; this.ai = ai; this.catalog = catalog;
     }
 
+    /** Several challenges in one query, keyed by id (instead of one lookup per attempt). */
+    public static Map<Long, Challenge> byId(ChallengeRepo repo, Collection<Long> ids) {
+        Map<Long, Challenge> out = new HashMap<>();
+        if (ids.isEmpty()) return out;
+        for (Challenge c : repo.findAllById(new LinkedHashSet<>(ids))) out.put(c.id, c);
+        return out;
+    }
+
     public boolean hasContent(String language, String concept) {
         if (!catalog.practiceOpen(language, concept)) return false;
         return ai.isConfigured() || !challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).isEmpty();

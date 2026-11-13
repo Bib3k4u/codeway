@@ -35,12 +35,15 @@ public class MasteryService {
     public MasteryService(MasteryRepo repo) { this.repo = repo; }
 
     public ConceptMastery get(Long userId, String language, String concept) {
-        return repo.findByUserIdAndLanguageAndConcept(userId, language, concept).orElseGet(() -> {
-            ConceptMastery m = new ConceptMastery();
-            m.userId = userId; m.language = language; m.concept = concept;
-            m.score = INITIAL_SCORE;
-            return m;
-        });
+        return repo.findByUserIdAndLanguageAndConcept(userId, language, concept).orElseGet(() -> blank(userId, language, concept));
+    }
+
+    /** A concept the learner hasn't started: nothing is stored yet, so building it needs no database lookup. */
+    public ConceptMastery blank(Long userId, String language, String concept) {
+        ConceptMastery m = new ConceptMastery();
+        m.userId = userId; m.language = language; m.concept = concept;
+        m.score = INITIAL_SCORE;
+        return m;
     }
 
     /** Difficulty (1..5) the learner should currently be working at. */

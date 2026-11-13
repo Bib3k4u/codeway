@@ -47,7 +47,10 @@ public class LearnController {
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> open = attempts.openConcepts(uid(req), language);
         for (var c : catalog.list(language)) {
-            ConceptMastery m = byConcept.getOrDefault(c.id(), mastery.get(uid(req), language, c.id()));
+            // All of this learner's rows were loaded above in one query; a concept without a row is simply not started yet.
+            // (getOrDefault(.., mastery.get(..)) would run a database query for every concept, found or not.)
+            ConceptMastery m = byConcept.get(c.id());
+            if (m == null) m = mastery.blank(uid(req), language, c.id());
             Map<String, Object> row = new LinkedHashMap<>();
             boolean practice = catalog.practiceOpen(language, c.id());
             row.put("id", c.id()); row.put("title", c.title()); row.put("summary", c.summary()); row.put("symbol", c.symbol());
