@@ -2,18 +2,17 @@
 # The Oracle server's updater (deploy/oracle/updater) checks that release every 2 minutes and installs new builds,
 # with a health check and rollback. No secrets and no inbound access to the server are needed.
 #
-# While the backend still runs on AWS this only runs when started by hand (Actions > Publish backend > Run).
-# At the Oracle cutover, add the push trigger below and remove deploy-backend.yml.
+# Runs on every push to master that touches the backend (or by hand: Actions > Publish backend > Run workflow).
 name: Publish backend
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [master]
-  #   paths:
-  #     - "backend/**"
-  #     - "deploy/ec2/sandbox/**"
-  #     - ".github/workflows/publish-backend.yml"
+  push:
+    branches: [master]
+    paths:
+      - "backend/**"
+      - "deploy/ec2/sandbox/**"
+      - ".github/workflows/publish-backend.yml"
 
 permissions:
   contents: write   # create the release
