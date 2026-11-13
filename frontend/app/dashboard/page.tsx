@@ -164,7 +164,9 @@ export default function Dashboard() {
 
 /** One track on the learning path: a numbered marker on a connecting line, then its concept cards. */
 function TrackStep({ track, rows, last, open, onToggle }: { track: Track; rows: ConceptRow[]; last: boolean; open: boolean; onToggle: () => void }) {
-  const mastered = rows.filter((r) => r.mastered).length;
+  // some tracks (design patterns) have practice for only part of their concepts so far
+  const practiced = rows.filter((r) => r.practice);
+  const mastered = practiced.filter((r) => r.mastered).length;
   const groups = [...new Set(rows.map((r) => r.group ?? ""))];
   return (
     <li className={`relative grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 last:pb-0 sm:gap-x-5 ${open ? "pb-10" : "pb-5"}`}>
@@ -180,7 +182,7 @@ function TrackStep({ track, rows, last, open, onToggle }: { track: Track; rows: 
           </div>
           <span className="flex items-center gap-3">
             {track.practice
-              ? <span className="chip chip-accent">{mastered} of {rows.length} mastered</span>
+              ? <span className="chip chip-accent">{mastered} of {practiced.length} mastered{practiced.length < rows.length ? " · rest are lessons" : ""}</span>
               : <span className="chip"><BookOpen size={12} />Lessons · practice coming soon</span>}
             <ChevronDown size={18} className={`text-label3 transition-transform duration-200 group-hover:text-label ${open ? "rotate-180" : ""}`} />
           </span>

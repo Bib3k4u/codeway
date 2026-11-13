@@ -16,10 +16,11 @@ import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, ApiError, saveDraftOnExit, type Files, type Hint, type HintQuota, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, ApiError, saveDraftOnExit, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
+import GuidePanel from "@/components/practice/GuidePanel";
 import { duration } from "@/lib/time";
 
 type Busy = null | "main" | "tests" | "submit" | "hint";
@@ -72,6 +73,8 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const { refresh: refreshStats } = useStats();
   const [party, setParty] = useState(false);
   const [lastMode, setLastMode] = useState<"main" | "tests">("main");
+  // design-pattern practice: the diagnose question comes first and the editor stays read-only until it is answered
+  const [quiz, setQuiz] = useState<QuizState | null>(null);
 
   // ---- telemetry ----
   const t0 = useRef(0);
@@ -100,7 +103,9 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const descWidth = Math.min(680, Math.max(280, Number(descW) || 380));
   // In focus mode the brief starts hidden but can be shown; outside it, the saved preference applies.
   const [focusBrief, setFocusBrief] = useState(false);
-  const showDesc = focus ? focusBrief : descHidden !== "1";
+  // the diagnose question lives in the brief, so a guided challenge keeps it open until it is answered
+  const briefRequired = !!start?.guide && !(quiz ?? start.guide.quiz).solved;
+  const showDesc = briefRequired || (focus ? focusBrief : descHidden !== "1");
   const toggleBrief = () => (focus ? setFocusBrief((v) => !v) : setDescHidden(descHidden === "1" ? "0" : "1"));
 
   const toggleFocus = useCallback((on: boolean) => {
@@ -170,7 +175,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
         saved.current = initial;
-        setStart(r); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
+        setStart(r); setQuiz(r.guide?.quiz ?? null); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
         const names = Object.keys(initial);
         const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
         setOpen([first]); setActive(first);
@@ -290,6 +295,12 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   }
 
   /** Restart the clock on this attempt (a fresh timed try at the same question). */
+  async function answerQuiz(option: string): Promise<QuizState> {
+    const r = await api<QuizState>(`/attempts/${attemptId}/quiz`, { option });
+    setQuiz(r);
+    return r;
+  }
+
   async function resetClock() {
     if (!attemptId) return;
     const r = await api<{ startedAt: string; serverNow: string }>(`/attempts/${attemptId}/timer/reset`, {});
@@ -313,7 +324,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
 
   const endParty = useCallback(() => setParty(false), []);
   const diagnostics = run?.diagnostics ?? [];
-  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setQuiz(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
   const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -353,6 +364,8 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   }
 
   const ch = start.challenge;
+  const guide: Guide | null = start.guide ? { ...start.guide, quiz: quiz ?? start.guide.quiz } : null;
+  const locked = !!guide && !guide.quiz.solved;
   const crumb = (
     <div className="hidden items-center gap-2 text-sm text-label2 md:flex">
       <ChevronLeft size={14} />
@@ -360,7 +373,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       <span className="text-label3">/</span>
       <span className="font-medium text-label">{ch.title}</span>
       <span className="chip">Level {ch.difficulty}</span>
-      <span className="chip chip-accent">{ch.scaffolding === "HEAVY" ? "Guided" : ch.scaffolding === "PARTIAL" ? "Skeleton" : "From scratch"}</span>
+      <span className="chip chip-accent">{guide ? "Refactor lab" : ch.scaffolding === "HEAVY" ? "Guided" : ch.scaffolding === "PARTIAL" ? "Skeleton" : "From scratch"}</span>
       {start.practice && <span className="chip" title="Redo from your history: graded, but mastery doesn't change">Practice</span>}
     </div>
   );
@@ -395,7 +408,8 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                     <ExpectedOutput expected={ch.sampleOutput} />
                   </section>
                 )}
-                {ch.testNames.length > 0 && (
+                {guide && <section className="mt-6"><GuidePanel guide={guide} names={ch.testNames} tests={testRun?.tests} onAnswer={answerQuiz} /></section>}
+                {!guide && ch.testNames.length > 0 && (
                   <section className="mt-6">
                     <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wider text-label3">Your code is checked for</h3>
                     <ul className="space-y-1.5">
@@ -514,8 +528,15 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                   )}
                 </div>
               </nav>
-              <div className="min-w-0 flex-1">
-                {active && files[active] !== undefined && <CodeEditor path={active} value={files[active]} onChange={(v) => onEdit(active, v)} diagnostics={diagnostics} files={files} />}
+              <div className="flex min-w-0 flex-1 flex-col">
+                {locked && (
+                  <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
+                    <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the brief to start editing.
+                  </p>
+                )}
+                <div className="min-h-0 flex-1">
+                  {active && files[active] !== undefined && <CodeEditor path={active} value={files[active]} onChange={(v) => onEdit(active, v)} diagnostics={diagnostics} files={files} readOnly={locked} />}
+                </div>
               </div>
             </div>
           </div>
@@ -696,13 +717,31 @@ function FixSheet({ r, busy, onFix, onMoveOn, onReveal }: { r: SubmitResp; busy:
   );
 }
 
+/** After a guided challenge: the pattern the learner just built gets its name, with its roles mapped to their own classes. */
+function RevealCard({ reveal }: { reveal: PatternReveal }) {
+  return (
+    <div className="pop mb-6 rounded-xl border border-[var(--accent-fill)] bg-card2 p-4">
+      <p className="text-[11.5px] font-semibold uppercase tracking-wider text-label3">What you just built</p>
+      <p className="mt-0.5 text-[22px] font-bold tracking-tight">{reveal.pattern} <span className="text-[13px] font-medium text-label3">· fixes a {reveal.principle} problem</span></p>
+      {reveal.roles && reveal.roles.length > 0 && (
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13.5px]">
+          {reveal.roles.map((x) => (
+            <div key={x.name} className="contents"><dt className="text-label3">{x.name}</dt><dd className="font-mono font-semibold">{x.is}</dd></div>
+          ))}
+        </dl>
+      )}
+      <p className="mt-3 text-[14px] leading-relaxed text-label2">{reveal.summary}</p>
+    </div>
+  );
+}
+
 function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; concept: string; lang: LangId; onNext: () => void; onHome: () => void }) {
   const [shown, setShown] = useState(r.scoreBefore);
   useEffect(() => { const t = setTimeout(() => setShown(r.scoreAfter), 350); return () => clearTimeout(t); }, [r.scoreAfter]);
   const up = r.delta >= 0;
   return (
     <Overlay onClose={() => {}}>
-      <div className="sheet pop w-full max-w-lg p-7">
+      <div className="sheet pop max-h-[92vh] w-full max-w-lg overflow-auto p-7">
         <div className="mb-6 flex flex-col items-center text-center">
           {r.mastered ? <Trophy className="mb-3 text-ok" size={34} /> : r.allPassed ? <Check className="mb-3 rounded-full bg-oksoft p-1.5 text-ok" size={34} /> : <XCircle className="mb-3 text-warn" size={34} />}
           <h2 className="display text-[44px]">{r.mastered ? "Concept mastered" : r.allPassed ? "Nicely done" : "Not quite yet"}</h2>
@@ -729,6 +768,7 @@ function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; conc
         <ul className="mb-6 space-y-2 text-[14px]">
           {r.feedback.map((f, i) => <li key={i} className="flex gap-2.5"><span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />{f}</li>)}
         </ul>
+        {r.reveal && <RevealCard reveal={r.reveal} />}
         {r.tests.some((t) => !t.passed) && (
           <div className="mb-6 max-h-[30vh] space-y-2 overflow-auto">
             {r.tests.filter((t) => !t.passed).map((t, i) => <FailedTest key={i} name={t.name} message={t.hidden && !t.revealed ? "A hidden edge case failed." : t.message} />)}
@@ -736,6 +776,7 @@ function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; conc
         )}
         <div className="flex gap-3">
           <button className="btn btn-secondary btn-lg flex-1" onClick={onHome}>Dashboard</button>
+          {r.reveal && !r.mastered && <Link href={`/learn/${concept}?lang=${lang}`} className="btn btn-secondary btn-lg flex-1">Read the lesson</Link>}
           {r.mastered
             ? <Link href={`/learn/${concept}?lang=${lang}`} className="btn btn-primary btn-lg flex-1">Review lesson</Link>
             : <button className="btn btn-primary btn-lg flex-1" onClick={onNext}>Next challenge<ArrowRight size={18} /></button>}

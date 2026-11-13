@@ -1,0 +1,48 @@
+{
+  "id": "decorator-order-addons",
+  "concept": "decorator",
+  "title": "Order extras that multiply the classes",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "If marketing asks for a fourth extra, how many new classes would you have to write, and what would each one repeat from the others?",
+    "Let an extra be an order itself: it holds another order, asks it for its price and description, and adds its own charge and text. Then extras can be stacked on anything.",
+    "public class GiftWrap implements Order {\n    private final Order inner;\n    public GiftWrap(Order inner) { this.inner = inner; }\n    public double price() { return inner.price() + 3.0; }\n    // description(): start from inner.description()\n}"
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Which principle does this code break most clearly?",
+      "explanation": "Every new extra forces new subclasses: GiftWrappedExpressOrder and InsuredExpressOrder exist only because two extras were combined, and each repeats the price and description logic of the single-extra classes. Each new extra means writing a whole new set of classes (the number would double every time) instead of adding one small piece, which is exactly what the Open/Closed principle warns against. It also means one class carries the knowledge of several extras at once, which strains Single Responsibility."
+    },
+    "steps": [
+      {
+        "title": "Give every order one common type",
+        "md": "Right now only `BasicOrder` can be an order, so nothing else can be used in its place.\n\nThe starter already has an interface `Order` (file `Order.java`) with two methods: `double price()` and `String description()`.\n\n1. Make `BasicOrder` implement `Order` (`public class BasicOrder implements Order`).\n2. Change the parameter of `show` in `Main` from `BasicOrder` to `Order`.\n\nNothing else changes: the old subclasses still extend `BasicOrder`, so they keep working. Run the tests: `S1:` should pass."
+      },
+      {
+        "title": "Make gift wrapping an order that wraps another order",
+        "md": "Fill in the class `GiftWrap` (file `GiftWrap.java`). It already `implements Order` and has the constructor `public GiftWrap(Order inner)`.\n\n1. Store the `Order` that is passed in a `private final Order inner` field.\n2. `price()` returns `inner.price() + 3.0`.\n3. `description()` returns `inner.description() + \" + gift wrap\"`.\n\nThe constructor takes an `Order`, not a `BasicOrder`: that is what lets `GiftWrap` wrap anything. For example `new GiftWrap(new BasicOrder(\"Book\", 12.0))` has price `15.0` and description `Book + gift wrap`. Run the tests: `S2:` should pass."
+      },
+      {
+        "title": "Add express handling and stack the extras",
+        "md": "Fill in the class `ExpressHandling` (file `ExpressHandling.java`) the same way: it `implements Order`, has the constructor `public ExpressHandling(Order inner)`, and keeps the order it wraps in a field.\n\n1. `price()` returns `inner.price() + 7.0`.\n2. `description()` returns `inner.description() + \" + express\"`.\n\nBecause both classes are orders that wrap an order, they can be combined in any order and repeated:\n\n- `new ExpressHandling(new GiftWrap(new BasicOrder(\"Book\", 12.0)))` has price `22.0` and description `Book + gift wrap + express`.\n- `new GiftWrap(new ExpressHandling(new BasicOrder(\"Book\", 12.0)))` has description `Book + express + gift wrap`.\n\nThe description lists the extras in the order they were applied. Run the tests: `S3:` should pass."
+      },
+      {
+        "title": "Prove a new extra needs no change, then delete the combinations",
+        "md": "The test file defines its own extra, `Insurance` (+2.5, ` + insurance`), as a class that implements `Order` and wraps an `Order`. It must work stacked with your classes without you changing any of them.\n\nYour job in this step is to finish the refactoring:\n\n1. Change `Main` so it builds its four orders with `BasicOrder`, `GiftWrap` and `ExpressHandling` instead of the combination classes. It must print exactly the four lines from the example.\n2. Delete the five classes `GiftWrappedOrder`, `ExpressOrder`, `GiftWrappedExpressOrder`, `InsuredOrder` and `InsuredExpressOrder`. Nothing needs them any more.\n\nRun `Main` to check the output, then run the tests: `S4:` should pass."
+      }
+    ],
+    "reveal": {
+      "pattern": "Decorator",
+      "principle": "Open/Closed",
+      "roles": [
+        { "name": "Component", "is": "Order" },
+        { "name": "ConcreteComponent", "is": "BasicOrder" },
+        { "name": "Decorator", "is": "the shape GiftWrap and ExpressHandling share: each implements Order and holds an Order to forward to" },
+        { "name": "ConcreteDecorator", "is": "GiftWrap and ExpressHandling (and the Insurance class in the tests)" }
+      ],
+      "summary": "Decorator lets you add behaviour to an object by wrapping it in another object with the same interface, so extras stack in any combination instead of needing a subclass for each one. A new extra is one new class and the existing ones stay untouched, which is Open/Closed in action. Do not use it when there are only one or two fixed variations (a plain subclass or a flag is simpler), or when callers need the exact concrete type or when the order of wrapping would be easy to get wrong and hard to debug."
+    }
+  }
+}

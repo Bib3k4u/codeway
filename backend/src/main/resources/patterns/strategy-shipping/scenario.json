@@ -1,0 +1,47 @@
+{
+  "id": "strategy-shipping",
+  "concept": "strategy",
+  "title": "Shipping costs that keep growing",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "Every new delivery type forces you to reopen the same method. What would have to be true for a new type to need no edit to existing code at all?",
+    "Give each way of pricing its own small object behind one shared interface, and let the calculator just look up the right object and ask it for the price.",
+    "Sketch: interface ShippingRule { double cost(double kg); } then in the calculator keep a Map<String, ShippingRule> rules, fill it with rules.put(\"standard\", new StandardShipping()), and cost(type, kg) becomes rules.get(type).cost(kg) (after a null check)."
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Look at ShippingCalculator.cost. Which principle does this code break most clearly?",
+      "explanation": "The switch inside ShippingCalculator.cost decides the price for every delivery type in one place. A drone or freight option means editing that method again, so the class is not closed against changes and every edit risks the prices that already work. That is the Open/Closed principle: new behaviour should arrive as new code, not as edits to old code."
+    },
+    "steps": [
+      {
+        "title": "Give each delivery type its own class",
+        "md": "Right now all prices live in one `switch`. Pull them apart.\n\n1. `ShippingRule` is already an interface with one method: `double cost(double kg)`. Leave its signature as it is.\n2. Fill in the three classes so each one prices a parcel exactly like its `case` in `ShippingCalculator.cost`:\n   - `StandardShipping implements ShippingRule` returns `5.0 + 1.0 * kg`\n   - `ExpressShipping implements ShippingRule` returns `10.0 + 2.5 * kg`\n   - `OvernightShipping implements ShippingRule` returns `25.0 + 4.0 * kg`\n\nEach class has a public no-argument constructor (the default one is fine). Do not change `ShippingCalculator` yet: it keeps working as before while you do this."
+      },
+      {
+        "title": "Make the calculator ask a rule instead of switching",
+        "md": "Now `ShippingCalculator` should stop knowing the formulas.\n\n1. Keep the rules in a `Map<String, ShippingRule>` field, keyed by the type name (`\"standard\"`, `\"express\"`, `\"overnight\"`).\n2. Fill the map in the **default constructor** `new ShippingCalculator()` with one `StandardShipping`, one `ExpressShipping` and one `OvernightShipping`.\n3. Fill in the **second constructor** `ShippingCalculator(Map<String, ShippingRule> rules)`: it copies the given rules into the calculator's own map (use `putAll` into a `new HashMap<>()`, because the map you receive may be unmodifiable).\n4. Rewrite `cost(String type, double kg)` to look up the rule for `type` and return `rule.cost(kg)`. Delete the `switch`.\n\nThe old calls such as `new ShippingCalculator().cost(\"standard\", 2.0)` must give the same prices as before. For now you may ignore what happens with an unknown type."
+      },
+      {
+        "title": "Reject unknown delivery types",
+        "md": "With the `switch` gone, a type that nobody registered has nowhere to go (it may even crash with a `NullPointerException`). Make the failure clear.\n\nIn `ShippingCalculator.cost(String type, double kg)`, when there is no rule for `type`, throw an `IllegalArgumentException` whose message is exactly `Unknown shipping type: ` followed by the type, for example `Unknown shipping type: drone`.\n\nThis applies to both constructors: a calculator built from your own map only knows the types in that map."
+      },
+      {
+        "title": "Add a delivery type at runtime",
+        "md": "The goal of the whole refactoring: a new delivery type must not require editing any class that already exists.\n\nImplement `public void register(String type, ShippingRule rule)` in `ShippingCalculator`. It stores the rule under that type name in the calculator's own map, so that `cost(type, kg)` uses it from then on. Registering a name that already exists replaces the old rule. Two different `ShippingCalculator` objects must not share their rules.\n\nThe tests prove it by defining new delivery types inside the test file itself (a lambda and a small class) and registering them, without touching `ShippingCalculator`, `ShippingRule` or the three shipping classes."
+      }
+    ],
+    "reveal": {
+      "pattern": "Strategy",
+      "principle": "Open/Closed",
+      "roles": [
+        { "name": "Context", "is": "ShippingCalculator" },
+        { "name": "Strategy", "is": "ShippingRule" },
+        { "name": "ConcreteStrategy", "is": "StandardShipping, ExpressShipping and OvernightShipping (and any rule registered later, like the ones in the tests)" }
+      ],
+      "summary": "The Strategy pattern puts each interchangeable algorithm behind one interface and lets a context object pick one and delegate to it. Here it turned a growing switch into small rule classes, so a new delivery type is new code instead of an edit to ShippingCalculator. Do not use it when there are only two or three variants that will never change, or when the variants differ by a single value: a plain if or a parameter is simpler, and extra classes would only add indirection."
+    }
+  }
+}

@@ -22,7 +22,17 @@ export interface StartResp extends TimeRecord {
   practice?: boolean; revealed?: number[]; hintQuota?: HintQuota;
   /** clock: the attempt's start (moves forward over breaks) and the server's time, to correct for a skewed device clock */
   serverNow?: string;
+  /** design-pattern challenges: diagnose question first, then small refactoring steps */
+  guide?: Guide;
 }
+export interface QuizState {
+  question: string; options: { id: string; text: string }[]; tries: number; solved: boolean;
+  /** only once solved */
+  answers?: string[]; explanation?: string; correct?: boolean;
+}
+export interface Guide { quiz: QuizState; steps: { title: string; md: string }[] }
+/** Shown after a guided challenge is finished: now the pattern gets its name. */
+export interface PatternReveal { pattern: string; principle: string; roles?: { name: string; is: string }[]; summary: string; concept: string }
 /** The learner's record on a challenge. */
 export interface TimeRecord {
   attemptNumber?: number; submittedAttempts?: number; bestSeconds?: number | null; longestSeconds?: number | null;
@@ -44,6 +54,7 @@ export interface SubmitResp extends RunResp {
   /** 0..1, read from how the learner worked; calibration holds its label (fluent / steady / effortful) */
   fluency?: number; practice?: boolean; seconds?: number;
   bestSeconds?: number | null; longestSeconds?: number | null; attemptNumber?: number; submittedAttempts?: number;
+  reveal?: PatternReveal;
 }
 export interface RevealResp { index: number; name: string; passed?: boolean; message?: string; reveals: number }
 export interface HistoryItem {

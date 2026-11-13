@@ -1,0 +1,47 @@
+{
+  "id": "factory-report-exporters",
+  "concept": "factory-method",
+  "title": "A report service that has to know every format",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "Look at what ReportService needs to know in order to export a report. Does it really need to know which classes exist, or only that something can turn rows into text?",
+    "Give the three exporters one shared type, and move the decision \"which exporter for this format name?\" out of ReportService into a small class of its own. ReportService should then only talk to the shared type.",
+    "Roughly: `public interface Exporter { String export(List<String> rows); }`, and in ReportService `Exporter exporter = registry.create(format); return exporter.export(rows);`, where the registry holds a `Map<String, Supplier<Exporter>>`."
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Which principle does this code break most clearly?",
+      "explanation": "Look at ReportService.export: it contains `new CsvExporter()`, `new JsonExporter()` and `new TextExporter()`, so the high-level service is welded to every concrete exporter and depends on details instead of on an abstraction (Dependency Inversion). It also has to be edited, adding another `else if` and another `new ...` line, for every new format, so it is not closed for modification (Open/Closed). The three exporters share no type, so there is nothing for the service to depend on instead."
+    },
+    "steps": [
+      {
+        "title": "Give the exporters one shared type",
+        "md": "All three exporters already have the same method, but nothing says so. Make that explicit.\n\n1. In `Exporter.java`, the interface is already declared with `String export(List<String> rows);`. Keep it exactly like that.\n2. Make `CsvExporter`, `JsonExporter` and `TextExporter` each `implements Exporter` (add `@Override` on their `export` method if you like).\n\nDo not change what the exporters return, and leave `ReportService` alone for now. Run the tests: the `Guard:` tests keep passing and the `S1:` tests turn green."
+      },
+      {
+        "title": "Move the choice of exporter into its own class",
+        "md": "Create the decision in one place that is not `ReportService`. In `ExporterRegistry.java`:\n\n1. Implement `public Exporter create(String format)`.\n2. It returns `new CsvExporter()` for `\"csv\"`, `new JsonExporter()` for `\"json\"` and `new TextExporter()` for `\"text\"`. The return type is the shared type `Exporter`, not the concrete class.\n3. Any other format throws `new IllegalArgumentException(\"Unknown format: \" + format)` (for example `Unknown format: xml`).\n\nA plain `if`/`else` or `switch` is fine here. Leave `register(...)` as it is for now and leave `ReportService` untouched. The `S2:` tests call `new ExporterRegistry().create(...)` directly."
+      },
+      {
+        "title": "Hand ReportService its registry",
+        "md": "Now take the `new ...Exporter()` lines out of `ReportService`.\n\n1. Add a field `private final ExporterRegistry registry;` and fill it in the constructor `public ReportService(ExporterRegistry registry)`.\n2. Keep the default constructor `public ReportService()`, but make it use `new ExporterRegistry()`, so the old call `new ReportService().export(\"csv\", rows)` still works.\n3. Rewrite `export(String format, List<String> rows)`: ask `registry.create(format)` for an `Exporter` and return `exporter.export(rows)`. Delete the `if`/`else` chain, the three `new ...Exporter()` lines and the unknown-format `throw` (the registry does that now).\n\nThe `S3:` tests pass in a registry of their own, a subclass of `ExporterRegistry` that overrides `create`, so keep `ExporterRegistry` non-final and `create` a public instance method (not `static`). When this works, `ReportService` no longer mentions `CsvExporter`, `JsonExporter` or `TextExporter` anywhere."
+      },
+      {
+        "title": "Let new formats be added at runtime",
+        "md": "A new format should not require editing any existing class. In `ExporterRegistry.java`:\n\n1. Add a field `private final Map<String, Supplier<Exporter>> suppliers = new HashMap<>();` (one map per registry, not `static`).\n2. Implement `public void register(String format, Supplier<Exporter> supplier)`: store the supplier under that format name. Registering a name that already exists replaces the old supplier.\n3. In the constructor, register the three built-in formats: `register(\"csv\", CsvExporter::new)`, `register(\"json\", JsonExporter::new)` and `register(\"text\", TextExporter::new)`.\n4. Change `create(String format)` to look the supplier up in the map and return `supplier.get()`. If there is no supplier it still throws `IllegalArgumentException(\"Unknown format: \" + format)`.\n\nThe `S4:` tests define a brand-new exporter inside the test file, register it, and export through `ReportService` without changing any existing class."
+      }
+    ],
+    "reveal": {
+      "pattern": "Factory Method",
+      "principle": "Dependency Inversion",
+      "roles": [
+        { "name": "Creator", "is": "ExporterRegistry (its create method decides which exporter to build; ReportService is the client that only asks)" },
+        { "name": "Product", "is": "Exporter" },
+        { "name": "ConcreteProduct", "is": "CsvExporter, JsonExporter, TextExporter (and the exporter the tests added)" }
+      ],
+      "summary": "You moved the decision of which class to create out of ReportService into one place, and made ReportService depend only on the Exporter interface, so a new format means one new class and one register call instead of another branch in the service. To be honest about the label: a registry with a create method is the \"simple factory\" flavour; it grows into the full Factory Method pattern when creation becomes an overridable method that subclasses specialise, which your tests quietly did when they overrode create in a registry of their own. Do not reach for it when there is only one concrete type and no second one in sight, when the object is trivial to construct, or when a plain constructor call would be clearer: an extra interface and a registry for a single class is just indirection."
+    }
+  }
+}

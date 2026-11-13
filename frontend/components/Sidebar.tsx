@@ -135,7 +135,8 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
               {groups.map(({ track, rows: list }) => {
                 const isOpen = open.has(track.id);
                 const Icon = conceptGlyph(TRACK_SYMBOL[track.id] ?? "cube");
-                const mastered = list.filter((c) => c.mastered).length;
+                const practiced = list.filter((c) => c.practice);
+                const mastered = practiced.filter((c) => c.mastered).length;
                 return (
                   <div key={track.id}>
                     <button className="navitem !h-[38px]" aria-expanded={isOpen} aria-controls={`nav-${track.id}`} onClick={() => toggle(track.id)}
@@ -143,7 +144,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed
                       <Icon size={17} className={`navicon ${track.id === activeTrack ? "!text-accent" : ""}`} />
                       <span className="min-w-0 flex-1 truncate font-semibold text-label">{SHORT[track.id] ?? track.title}</span>
                       {track.practice
-                        ? <span className="text-[11.5px] tabular-nums text-label3" aria-label={`${mastered} of ${list.length} mastered`}>{mastered}/{list.length}</span>
+                        ? <span className="text-[11.5px] tabular-nums text-label3" aria-label={`${mastered} of ${practiced.length} mastered`}>{mastered}/{practiced.length}</span>
                         : <BookOpen size={13} className="shrink-0 text-label3" aria-label="Lessons only for now" />}
                       <ChevronRight size={14} className={`shrink-0 text-label3 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
                     </button>
@@ -236,12 +237,13 @@ function Flyout({ track, rows, top, left, pathname, onClose, onTip, onTipEnd }: 
     document.addEventListener("keydown", away);
     return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", away); };
   }, [onClose]);
-  const mastered = rows.filter((c) => c.mastered).length;
+  const practiced = rows.filter((c) => c.practice);
+  const mastered = practiced.filter((c) => c.mastered).length;
   return createPortal(
     <div ref={ref} role="menu" aria-label={track.title} onMouseOver={onTip} onMouseLeave={onTipEnd} onClick={onTipEnd} className="pop fixed z-[200] w-[264px] rounded-2xl border border-sep bg-card p-2 shadow-[var(--shadow-lg)]" style={{ left, top: y }}>
       <div className="flex items-baseline justify-between gap-3 px-2.5 pb-1.5 pt-1.5">
         <p className="text-[13px] font-semibold"><span className="mr-1.5 tabular-nums text-label3">{track.order}</span>{track.title}</p>
-        <span className="shrink-0 text-[11.5px] tabular-nums text-label3">{track.practice ? `${mastered}/${rows.length}` : "Lessons"}</span>
+        <span className="shrink-0 text-[11.5px] tabular-nums text-label3">{track.practice ? `${mastered}/${practiced.length}` : "Lessons"}</span>
       </div>
       <div className="max-h-[60vh] overflow-y-auto">
         <ConceptList rows={rows} pathname={pathname} />

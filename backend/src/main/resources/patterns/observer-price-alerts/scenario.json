@@ -1,0 +1,47 @@
+{
+  "id": "observer-price-alerts",
+  "concept": "observer",
+  "title": "A price feed that knows too much",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "Which classes does PriceFeed know about by name, and what would you have to edit to add a fourth one?",
+    "Give everything that reacts to a price one small shared type, and let the feed work only with that type: it keeps whatever it is handed instead of creating the consumers itself.",
+    "private final List<PriceListener> listeners = new ArrayList<>();\npublic void update(String symbol, double price) {\n    for (PriceListener l : listeners) l.onPrice(symbol, price);\n}"
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Which principle does this code break most clearly?",
+      "explanation": "PriceFeed (a high-level class that should only care about prices arriving) creates its three consumers itself with `new ConsoleDisplay(output)`, `new AlertLogger(output, 100.0)` and `new TrendAnalyzer(output)`, and calls each one by its concrete method (`show`, `check`, `track`) inside `update`. It therefore depends on concrete details instead of an abstraction, which is Dependency Inversion. It also forces a change to PriceFeed for every new consumer, but the root cause is the direct dependency on the concrete classes."
+    },
+    "steps": [
+      {
+        "title": "Give the consumers a common type",
+        "md": "Right now `PriceFeed` has to know three different method names. Give the three consumers one shared way to be told about a price.\n\n1. Open `PriceListener.java`. It already declares `void onPrice(String symbol, double price);`. Keep it as it is.\n2. Make `ConsoleDisplay`, `AlertLogger` and `TrendAnalyzer` each `implements PriceListener`.\n3. In each class, turn the current method (`show`, `check`, `track`) into `onPrice(String symbol, double price)` with the same behaviour. Keep their constructors unchanged.\n4. `PriceFeed` still calls the old method names, so update those three calls in `update` to `onPrice`. The feed must still print exactly what it printed before.\n\nTests for this step check that each consumer is a `PriceListener` and reacts correctly when you call `onPrice` on it."
+      },
+      {
+        "title": "Let the feed hold a list of listeners",
+        "md": "Now stop `PriceFeed` from creating and calling the three consumers by name.\n\n1. Give `PriceFeed` a field `List<PriceListener> listeners`.\n2. Implement `public void subscribe(PriceListener listener)`: it adds the listener to the list.\n3. Change `update(String symbol, double price)` so it calls `onPrice(symbol, price)` on **every** subscribed listener, in the order they were subscribed.\n4. Implement `public static PriceFeed empty()`: a feed with **no** listeners at all.\n5. Keep `new PriceFeed()` behaving exactly as before: it must come with the same three consumers (still sharing the feed's `output` list) already subscribed, in the order display, alert, trend. Remove the three separate fields and the three direct calls.\n\nHint: a private constructor taking a `boolean withDefaults` is one easy way to share code between `new PriceFeed()` and `empty()`.\n\nTests for this step use `PriceFeed.empty()` with listeners written as lambdas, and also subscribe extra listeners to a `new PriceFeed()`."
+      },
+      {
+        "title": "Let a listener leave",
+        "md": "Some consumers only care for a while. Implement `public void unsubscribe(PriceListener listener)` in `PriceFeed`:\n\n1. After `unsubscribe(x)`, `x` receives no further prices, and everyone else still does.\n2. Unsubscribing a listener that was never subscribed does nothing (no exception).\n3. A listener may call `feed.unsubscribe(...)` on **itself from inside** its own `onPrice`, while the feed is delivering a price. That must not throw, and no other listener may be skipped for that price. Think about what happens to a list you are looping over when you remove an element from it. One safe approach is to loop over a copy of the list.\n\nTests for this step subscribe three lambdas and have the middle one remove itself during delivery."
+      },
+      {
+        "title": "Plug in something brand new",
+        "md": "The point of all this is that new consumers need no edits to existing classes. The final tests prove it: the hidden test file defines its own listener class (a `PeakTracker` that remembers the highest price per symbol), subscribes it to an empty feed and to a standard `new PriceFeed()`, sends updates, and then unsubscribes it again. It never edits `PriceFeed`, `ConsoleDisplay`, `AlertLogger` or `TrendAnalyzer`.\n\nYour task: make sure that passes.\n\n1. In `Main`, after creating the feed, subscribe a lambda of your own, for example `feed.subscribe((symbol, price) -> System.out.println(\"tick \" + symbol));`, run it and see the extra lines appear without any other class changing. (The tests do not check `Main`, and you can remove the line afterwards.)\n2. Check that `PriceFeed` contains no reference to any specific listener class except in the code that sets up the default three for `new PriceFeed()`. If a step 4 test fails, look for a leftover direct dependency or for a feed that treats the default listeners specially (for example, in `unsubscribe`).\n\nRun the tests when you are done."
+      }
+    ],
+    "reveal": {
+      "pattern": "Observer",
+      "principle": "Dependency Inversion",
+      "roles": [
+        { "name": "Subject (the thing being watched)", "is": "PriceFeed, with subscribe, unsubscribe and update" },
+        { "name": "Observer (the abstraction)", "is": "PriceListener" },
+        { "name": "ConcreteObserver", "is": "ConsoleDisplay, AlertLogger, TrendAnalyzer, and the PeakTracker defined in the tests" }
+      ],
+      "summary": "Observer lets a subject announce changes to any number of observers it knows only through one small interface, so PriceFeed now depends on the PriceListener abstraction instead of three concrete classes, and new consumers plug in without editing it. Notifying over a copy of the list is what made unsubscribing during a notification safe. Do not use it when there is exactly one fixed consumer (a direct call is simpler and easier to follow), when the order of reactions really matters and must be strictly controlled, or when listeners are easy to forget to unsubscribe and could leak memory."
+    }
+  }
+}

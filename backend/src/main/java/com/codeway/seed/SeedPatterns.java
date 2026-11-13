@@ -103,9 +103,13 @@ public class SeedPatterns implements ApplicationRunner {
 
     private static Map<String, String> dir(PathMatchingResourcePatternResolver resolver, String pattern) throws IOException {
         Map<String, String> files = new TreeMap<>();
-        for (Resource r : resolver.getResources(pattern)) {
-            String name = r.getFilename();
-            if (name != null && name.contains(".") && r.isReadable()) files.put(name, text(r));
+        try {
+            for (Resource r : resolver.getResources(pattern)) {
+                String name = r.getFilename();
+                if (name != null && name.contains(".") && r.isReadable()) files.put(name, text(r));
+            }
+        } catch (java.io.FileNotFoundException none) {
+            // a language this scenario has no files for (they are translated on demand)
         }
         return files;
     }
