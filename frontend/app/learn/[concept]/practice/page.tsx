@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, Trash2, X, XCircle, Trophy, Terminal } from "lucide-react";
+import { ArrowRight, Check, Pencil, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, Trash2, X, XCircle, Trophy, Terminal } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import CodeEditor from "@/components/CodeEditor";
 import Markdown from "@/components/Markdown";
@@ -20,6 +20,7 @@ import { api, ApiError, saveDraftOnExit, type Files, type Guide, type Hint, type
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
+import FloatingTip, { type Tip } from "@/components/FloatingTip";
 import GuidePanel from "@/components/practice/GuidePanel";
 import { duration } from "@/lib/time";
 
@@ -75,6 +76,18 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const [lastMode, setLastMode] = useState<"main" | "tests">("main");
   // design-pattern practice: the diagnose question comes first and the editor stays read-only until it is answered
   const [quiz, setQuiz] = useState<QuizState | null>(null);
+  // asking for a hint first shows what it costs; the hint is only fetched after the learner agrees
+  const [hintAsk, setHintAsk] = useState(false);
+  // file list: width the learner can drag, a tooltip with the full file name, and renaming of files they created
+  const [filesW, setFilesW] = usePref("filesW", "176");
+  const filesWidth = Math.min(300, Math.max(128, Number(filesW) || 176));
+  const [fileTip, setFileTip] = useState<Tip | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // Enter and the blur that follows it must not both commit: each edit commits once
+  const addingRef = useRef(false);
+  const renamingRef = useRef<string | null>(null);
+  const startRename = (n: string) => { renamingRef.current = n; setRenameVal(n); setRenaming(n); };
+  const [renameVal, setRenameVal] = useState("");
 
   // ---- telemetry ----
   const t0 = useRef(0);
@@ -136,6 +149,11 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
     const r = wsRef.current?.getBoundingClientRect(); if (!r) return;
     setDescW(String(Math.round(Math.min(Math.min(680, r.width * 0.6), Math.max(280, x - r.left - 12)))));
   };
+  const filesRef2 = useRef<HTMLDivElement>(null);
+  const moveFiles = (x: number) => {
+    const r = filesRef2.current?.getBoundingClientRect(); if (!r) return;
+    setFilesW(String(Math.round(Math.min(300, Math.max(128, x - r.left)))));
+  };
   const moveConsole = (y: number) => {
     const r = rightRef.current?.getBoundingClientRect(); if (!r) return;
     setConsoleH(String(Math.round(Math.min(r.height * 0.7, Math.max(96, r.bottom - y - 17)))));
@@ -188,13 +206,14 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   }, [concept, startKey, lang, redo]);
 
   function onEdit(path: string, value: string) {
-    if (!attemptId || value === files[path]) return;
+    // a late change event for a file that was just renamed or deleted must not bring it back
+    if (!attemptId || files[path] === undefined || value === files[path]) return;
     if (!sentFirst.current) {
       sentFirst.current = true;
       queue.current.push({ attemptId, type: "first_keystroke", payload: { ms: Math.round(performance.now() - t0.current) } });
     }
     if ((files[path]?.length ?? 0) - value.length > 60) queue.current.push({ attemptId, type: "churn", payload: { removed: files[path].length - value.length } });
-    setFiles((f) => ({ ...f, [path]: value }));
+    setFiles((f) => (path in f ? { ...f, [path]: value } : f));   // the list in this closure can be a render behind
   }
 
   async function exec(mode: "main" | "tests") {
@@ -278,12 +297,32 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
     setOpen((o) => { const n = o.filter((x) => x !== name); if (active === name) setActive(n[n.length - 1] ?? ""); return n; });
   }
   function addFile() {
+    if (!addingRef.current) return;
+    addingRef.current = false;
     let n = (newName ?? "").trim();
     if (!n) { setNewName(null); return; }
     const info = langInfo(lang);
     if (!/\.[a-z]+$/.test(n)) n += info.ext;
     if (!info.file.test(n) || files[n] !== undefined) { setNewName(null); return; }
     setFiles((f) => ({ ...f, [n]: info.template(n.replace(/\.[a-z]+$/, "")) })); openFile(n); setNewName(null);
+  }
+
+  /** Rename a file the learner created. Keeps its place in the list, its open tab, and (Java) the class name inside it. */
+  function renameFile(oldName: string, raw: string) {
+    if (renamingRef.current !== oldName) return;
+    renamingRef.current = null;
+    setRenaming(null);
+    let n = raw.trim();
+    if (!n || n === oldName || oldName in starter) return;
+    const info = langInfo(lang);
+    if (!/\.[a-z]+$/.test(n)) n += info.ext;
+    if (!info.file.test(n) || files[n] !== undefined || n in starter) return;
+    const oldBase = oldName.replace(/\.[a-z]+$/, ""), newBase = n.replace(/\.[a-z]+$/, "");
+    setFiles((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => k === oldName
+      ? [n, lang === "java" ? v.replace(new RegExp(`\\b(class|interface|enum|record)\\s+${oldBase}\\b`), `$1 ${newBase}`) : v]
+      : [k, v])));
+    setOpen((o) => o.map((x) => (x === oldName ? n : x)));
+    setActive((a) => (a === oldName ? n : a));
   }
 
   /** Reveal one hidden test (costs a little mastery): fills in its name and failure message in the results. */
@@ -390,7 +429,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               {guide && <button role="tab" className="ptab" aria-selected={left === "steps"} onClick={() => setLeft("steps")}>Steps{!guide.quiz.solved && <span className="h-1.5 w-1.5 rounded-full bg-accentfill" aria-label="Question waiting" />}</button>}
               <button role="tab" className="ptab" aria-selected={left === "hints"} onClick={() => setLeft("hints")}>Hints{hintLevel > 0 && <span className="chip !h-[18px] !px-1.5 !text-[10px]">{hintLevel}</span>}</button>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={getHint} disabled={busy !== null || hintLevel >= 4 || hintsBlocked}
+            <button className="btn btn-secondary btn-sm" onClick={() => setHintAsk(true)} disabled={busy !== null || hintLevel >= 4 || hintsBlocked}
               title={hintsBlocked ? `You've used your ${hintQuota?.limit ?? 5} hints for this hour` : hintLevel >= 3 ? "Shows the full solution and lowers mastery" : "Opt-in help. Costs a little mastery"}>
               {busy === "hint" ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
               {hintLevel >= 4 ? "No more hints" : hintsBlocked ? `Hints reset in ${hintMins} min` : hintLevel === 3 ? "Show solution" : "Need a hint?"}
@@ -499,37 +538,51 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                 </button>
               </div>
             </div>
-            <div className="flex min-h-0 flex-1">
-              <nav className="hidden w-[176px] shrink-0 flex-col border-r border-sep bg-card2 p-2 sm:flex" aria-label="Project files">
+            <div ref={filesRef2} className="flex min-h-0 flex-1">
+              <nav style={{ width: filesWidth }} className="hidden shrink-0 flex-col bg-card2 p-2 sm:flex" aria-label="Project files">
                 <div className="mb-1 flex items-center justify-between px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-label3">
                   Files
-                  <button aria-label="New file" title="New file" onClick={() => setNewName("")} className="rounded p-0.5 hover:bg-fill"><Plus size={14} /></button>
+                  <button aria-label="New file" title="New file" onClick={() => { addingRef.current = true; setNewName(""); }} className="rounded p-0.5 hover:bg-fill"><Plus size={14} /></button>
                 </div>
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
                   {fileNames.map((n) => {
                     const mine = !(n in starter);
+                    if (renaming === n) {
+                      return (
+                        <input key={n} autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onFocus={(e) => e.currentTarget.select()}
+                          onBlur={() => renameFile(n, renameVal)}
+                          onKeyDown={(e) => { if (e.key === "Enter") renameFile(n, renameVal); if (e.key === "Escape") { renamingRef.current = null; setRenaming(null); } }}
+                          aria-label={`Rename ${n}`} className="w-full rounded-lg bg-fill px-2 py-1.5 text-[13px] outline-none ring-2 ring-accent/40" />
+                      );
+                    }
+                    const showTip = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setFileTip({ text: mine ? `${n} (yours: double-click to rename)` : n, x: r.right, y: r.top + r.height / 2, place: "right", leftX: r.left }); };
                     return (
                       <div key={n} className={`group flex w-full items-center rounded-lg text-[13px] ${n === active ? "bg-fill font-semibold text-label" : "text-label2 hover:bg-fill hover:text-label"}`}>
-                        <button onClick={() => openFile(n)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left" title={n}>
+                        <button onClick={() => openFile(n)} onDoubleClick={() => { if (mine) startRename(n); }}
+                          onMouseEnter={(e) => showTip(e.currentTarget)} onMouseLeave={() => setFileTip(null)} onFocus={(e) => showTip(e.currentTarget)} onBlur={() => setFileTip(null)}
+                          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
                           <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>
                         </button>
                         {mine && (deleting === n ? (
                           <button onClick={() => { deleteFile(n); setDeleting(null); }} onBlur={() => setDeleting(null)} autoFocus
                             className="mr-1 shrink-0 rounded-md bg-badsoft px-1.5 py-0.5 text-[11px] font-semibold text-bad" aria-label={`Confirm delete ${n}`}>Delete</button>
-                        ) : (
-                          <button onClick={() => setDeleting(n)} aria-label={`Delete ${n}`} title="Delete file (only files you added)"
+                        ) : (<>
+                          <button onClick={() => { setFileTip(null); startRename(n); }} aria-label={`Rename ${n}`}
+                            className="shrink-0 rounded-md p-1 text-label3 opacity-0 transition-opacity hover:text-label focus-visible:opacity-100 group-hover:opacity-100"><Pencil size={12} /></button>
+                          <button onClick={() => setDeleting(n)} aria-label={`Delete ${n}`}
                             className="mr-1 shrink-0 rounded-md p-1 text-label3 opacity-0 transition-opacity hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"><Trash2 size={13} /></button>
-                        ))}
+                        </>))}
                       </div>
                     );
                   })}
                   {newName !== null && (
                     <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onBlur={addFile}
-                      onKeyDown={(e) => { if (e.key === "Enter") addFile(); if (e.key === "Escape") setNewName(null); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") addFile(); if (e.key === "Escape") { addingRef.current = false; setNewName(null); } }}
                       placeholder={langInfo(lang).placeholder} className="w-full rounded-lg bg-fill px-2 py-1.5 text-[13px] outline-none ring-2 ring-accent/40" />
                   )}
                 </div>
               </nav>
+              <div className="hidden sm:flex"><Splitter orientation="vertical" label="Resize file list" onMove={moveFiles} onNudge={(d) => setFilesW(String(filesWidth + d))} onReset={() => setFilesW("176")} /></div>
               <div className="flex min-w-0 flex-1 flex-col">
                 {locked && (
                   <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
@@ -597,6 +650,32 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
           </div>
         </section>
       </div>
+
+      <FloatingTip tip={fileTip} />
+
+      {/* ---------- Hint: say what it costs, then show it only if the learner agrees ---------- */}
+      {hintAsk && (
+        <Overlay onClose={() => setHintAsk(false)}>
+          <div className="pop w-full max-w-[440px] rounded-[22px] border border-sep bg-card p-7 shadow-[var(--shadow-lg)]" role="alertdialog" aria-labelledby="hint-title">
+            <span className="mb-4 grid h-11 w-11 place-items-center rounded-full bg-[var(--orange-soft)] text-warn"><Lightbulb size={20} /></span>
+            <h2 id="hint-title" className="text-[22px] font-bold tracking-[-0.02em]">{hintLevel >= 3 ? "Show the full solution?" : `Use hint ${hintLevel + 1} of 4?`}</h2>
+            <p className="mt-2 text-[14.5px] leading-relaxed text-label2">
+              {start.practice
+                ? "This is practice, so your mastery won't change. "
+                : hintLevel === 0 ? "This attempt will earn a little less mastery (about 8% less), and your clean-streak starts over. "
+                : hintLevel === 1 ? "This attempt will earn noticeably less mastery (about 20% less), and your clean-streak starts over. "
+                : hintLevel === 2 ? "This attempt will earn much less mastery (about 40% less), and your clean-streak starts over. "
+                : "This shows the complete answer. The attempt can earn at most a fifth of its mastery, and your clean-streak starts over. "}
+              {hintLevel === 0 ? "You get a nudge, not the answer." : hintLevel === 1 ? "You get the key idea." : hintLevel === 2 ? "You get part of the code." : ""}
+            </p>
+            {hintQuota && <p className="mt-2 text-[13px] text-label3">It also uses one of your {hintQuota.limit} hints this hour ({hintQuota.left} left).</p>}
+            <div className="mt-6 flex justify-end gap-2.5">
+              <button className="btn btn-secondary" onClick={() => setHintAsk(false)} autoFocus>Not yet</button>
+              <button className="btn btn-primary" onClick={() => { setHintAsk(false); getHint(); }}>{hintLevel >= 3 ? "Show solution" : "Show hint"}</button>
+            </div>
+          </div>
+        </Overlay>
+      )}
 
       {restored && (
         <div className="pop pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
