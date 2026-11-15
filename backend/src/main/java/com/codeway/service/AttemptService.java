@@ -674,8 +674,23 @@ public class AttemptService {
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("attemptId", a.id);
-        out.put("challenge", Map.of("id", ch.id, "title", ch.title, "descriptionMd", ch.descriptionMd, "language", ch.language,
-                "concept", ch.concept, "difficulty", ch.difficulty));
+        // Same shape as the challenge page's start response, so the app can show a past attempt in the challenge workspace.
+        out.put("challenge", Map.ofEntries(
+                Map.entry("id", ch.id), Map.entry("title", ch.title), Map.entry("descriptionMd", ch.descriptionMd),
+                Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
+                Map.entry("language", ch.language), Map.entry("concept", ch.concept),
+                Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
+                Map.entry("testNames", ChallengeService.testNames(ch)),
+                Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),
+                Map.entry("sampleOutput", challengeService.sampleOutput(ch))));
+        out.put("hints", Json.list(a.hintsJson));
+        Object last = Json.any(a.lastRunJson);
+        if (last != null) out.put("lastRun", last);
+        var guide = guideView(ch, a);
+        if (guide != null) out.put("guide", guide);
+        if (a.startedAt != null) out.put("startedAt", a.startedAt.toString());
+        if (a.elapsedSeconds != null) out.put("seconds", a.elapsedSeconds);
+        out.putAll(timeRecord(a.userId, ch.id, a.id));
         out.put("files", Json.files(a.finalFilesJson != null ? a.finalFilesJson : a.draftFilesJson));
         out.put("passed", a.testsPassed); out.put("total", a.testsTotal);
         out.put("delta", round(a.scoreAfter - a.scoreBefore));

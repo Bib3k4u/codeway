@@ -2,26 +2,26 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, Pencil, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, Trash2, X, XCircle, Trophy, Terminal } from "lucide-react";
+import { ArrowRight, Check, Eye, Pencil, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, Trash2, XCircle, Trophy, Terminal } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import CodeEditor from "@/components/CodeEditor";
 import Markdown from "@/components/Markdown";
 import Ring from "@/components/Ring";
 import Splitter from "@/components/Splitter";
 import Confetti from "@/components/Confetti";
 import { useStats } from "@/lib/stats";
-import { isLang, langInfo, type LangId } from "@/lib/lang";
+import { isLang, langInfo, langLabel, type LangId } from "@/lib/lang";
 import { useAuth } from "@/lib/auth";
 import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, ApiError, saveDraftOnExit, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, ApiError, saveDraftOnExit, type AttemptDetail, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel, { STEP_MS } from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
 import FloatingTip, { type Tip } from "@/components/FloatingTip";
 import GuidePanel from "@/components/practice/GuidePanel";
+import EditorGroups, { closeIn, moveTab, openIn, removeEverywhere, renameIn, splitOut, type Drag, type Group } from "@/components/practice/EditorGroups";
 import { duration } from "@/lib/time";
 
 type Busy = null | "main" | "tests" | "submit" | "hint";
@@ -40,19 +40,25 @@ export default function Practice() {
   if (!lang) return <AppShell><div className="skeleton mx-auto mt-10 h-8 w-64" /></AppShell>;
   // A fresh workspace per language: switching languages starts (or resumes) that language's challenge.
   const redo = Number(search.get("redo")) || null;
-  return <Workspace key={`${lang}:${redo ?? ""}`} concept={concept} lang={lang} redo={redo} />;
+  // ?view=<attempt>: a past attempt shown in this same workspace, with the learner's code and results, read-only
+  const view = Number(search.get("view")) || null;
+  return <Workspace key={`${lang}:${redo ?? ""}:${view ?? ""}`} concept={concept} lang={lang} redo={redo} view={view} />;
 }
 
 /** @param redo a past challenge to redo as practice (graded, mastery unchanged) */
-function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; redo: number | null }) {
+function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangId; redo: number | null; view: number | null }) {
   const router = useRouter();
   const { setLanguage } = useAuth();
   const { refresh: refreshConcepts } = useConcepts();
   const [start, setStart] = useState<StartResp | null>(null);
   const [error, setError] = useState("");
   const [files, setFiles] = useState<Files>({});
-  const [open, setOpen] = useState<string[]>([]);
-  const [active, setActive] = useState("");
+  // The editor can be split into up to three columns, each with its own open files; `drag` is the file being dragged right now.
+  const [groups, setGroups] = useState<Group[]>([{ id: 1, open: [], active: "" }]);
+  const [focusId, setFocusId] = useState(1);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const focusGroup = groups.find((g) => g.id === focusId) ?? groups[0];
+  const active = focusGroup.active;
   const [busy, setBusy] = useState<Busy>(null);
   const [run, setRun] = useState<RunResp | null>(null);
   const [left, setLeft] = useState<"brief" | "steps" | "hints">("brief");
@@ -67,9 +73,12 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   // The last test results stay in the Tests tab even after a plain Run; runSeq replays the result animation.
   const [testRun, setTestRun] = useState<RunResp | null>(null);
   const [runSeq, setRunSeq] = useState(0);
+  // the run whose results have already played out one by one; coming back to the Tests tab shows them at once
+  const playedSeq = useRef(0);
   const [result, setResult] = useState<SubmitResp | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [startKey, setStartKey] = useState(0);
+  const [detail, setDetail] = useState<{ passed: number; total: number; delta: number; at: string | null } | null>(null);
   const [restored, setRestored] = useState(false);
   const { refresh: refreshStats } = useStats();
   const [party, setParty] = useState(false);
@@ -96,6 +105,8 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const sentFirst = useRef(false);
   const queue = useRef<{ attemptId: number; type: string; payload: object }[]>([]);
   const attemptId = start?.attemptId;
+  // Nothing can change once a past attempt is shown or the result has been given: the code stays as it was submitted.
+  const frozen = view !== null || result !== null;
 
   const flush = useCallback(async () => {
     if (!queue.current.length) return;
@@ -166,15 +177,15 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const filesRef = useRef<Files>({});
   useEffect(() => { filesRef.current = files; }, [files]);
   useEffect(() => {
-    if (!attemptId || sheet === "result" || saved.current === files || Object.keys(files).length === 0) return;
+    if (!attemptId || frozen || saved.current === files || Object.keys(files).length === 0) return;
     const t = setTimeout(() => {
       saved.current = files;
       api(`/attempts/${attemptId}/draft`, { files }, "PUT").catch(() => { saved.current = null; });
     }, 1200);
     return () => clearTimeout(t);
-  }, [files, attemptId, sheet]);
+  }, [files, attemptId, frozen]);
   useEffect(() => {
-    if (!attemptId) return;
+    if (!attemptId || frozen) return;
     const flushNow = () => {
       if (document.visibilityState === "hidden" && saved.current !== filesRef.current && Object.keys(filesRef.current).length) {
         saved.current = filesRef.current; saveDraftOnExit(attemptId, filesRef.current);
@@ -183,14 +194,24 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
     document.addEventListener("visibilitychange", flushNow);
     window.addEventListener("pagehide", flushNow);
     return () => { document.removeEventListener("visibilitychange", flushNow); window.removeEventListener("pagehide", flushNow); };
-  }, [attemptId]);
+  }, [attemptId, frozen]);
 
   // ---- load challenge (or resume the unfinished one) ----
   const started = useRef(-1);
   useEffect(() => {
     if (started.current === startKey) return;
     started.current = startKey;
-    const req = redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : api<StartResp>("/challenges/next", { language: lang, concept });
+    const req = view
+      ? api<AttemptDetail>(`/attempts/${view}`).then((d): StartResp => {
+        setDetail({ passed: d.passed, total: d.total, delta: d.delta, at: d.submittedAt });
+        return {
+        attemptId: d.attemptId, challenge: d.challenge, resumed: true, draft: d.files, hints: d.hints, lastRun: d.lastRun, practice: d.practice,
+        guide: d.guide, startedAt: d.startedAt, serverNow: new Date().toISOString(), attemptNumber: d.attemptNumber, bestSeconds: d.bestSeconds,
+        longestSeconds: d.longestSeconds, submittedAttempts: d.submittedAttempts,
+        mastery: { score: 0, streak: 0, mastered: false, streakGoal: 3, attempts: 0 },
+        };
+      })
+      : redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : api<StartResp>("/challenges/next", { language: lang, concept });
     req
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
@@ -198,14 +219,14 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
         setStart(r); setQuiz(r.guide?.quiz ?? null); setLeft(r.guide ? "steps" : "brief"); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
         const names = Object.keys(initial);
         const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
-        setOpen([first]); setActive(first);
+        setGroups([{ id: 1, open: [first], active: first }]); setFocusId(1);
         setHints(r.hints ?? []);
-        if (r.lastRun) { setRun(r.lastRun); if (r.lastRun.tests?.length) setTestRun(r.lastRun); }
-        if (r.resumed) { setRestored(true); setTimeout(() => setRestored(false), 6000); }
+        if (r.lastRun) { setRun(r.lastRun); if (r.lastRun.tests?.length) { setTestRun(r.lastRun); if (view) setBottom("tests"); } }
+        else if (r.resumed) { setRestored(true); setTimeout(() => setRestored(false), 6000); }
         t0.current = performance.now(); sentFirst.current = r.resumed;
       })
       .catch((e) => setError(e.message));
-  }, [concept, startKey, lang, redo]);
+  }, [concept, startKey, lang, redo, view]);
 
   function onEdit(path: string, value: string) {
     // a late change event for a file that was just renamed or deleted must not bring it back
@@ -219,7 +240,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   }
 
   async function exec(mode: "main" | "tests") {
-    if (!attemptId) return;
+    if (!attemptId || frozen) return;
     setBusy(mode); setLastMode(mode);
     if (mode === "tests") { setBottom("tests"); setConsoleOpen("1"); }
     try {
@@ -236,7 +257,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
 
   /** finish=true ends the attempt with the current result ("Move on"). */
   async function submit(finish = false) {
-    if (!attemptId) return;
+    if (!attemptId || frozen) return;
     setBusy("submit"); setBottom("tests"); setConsoleOpen("1");
     try {
       await flush();
@@ -260,7 +281,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   }
 
   async function getHint() {
-    if (!attemptId) return;
+    if (!attemptId || frozen) return;
     setBusy("hint"); setLeft("hints");
     try {
       const failures = run?.tests.filter((t) => !t.passed).map((t) => `${t.name}: ${t.message}`).join("\n");
@@ -290,18 +311,26 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       if (fileHasTemplate) setFiles((f) => ({ ...f, [active]: starter[active] }));
     } else {
       setFiles({ ...starter });
-      const keep = open.filter((n) => n in starter);
-      const nextOpen = keep.length ? keep : [Object.keys(starter)[0]];
-      setOpen(nextOpen);
-      if (!(active in starter)) setActive(nextOpen[0]);
+      setGroups((gs) => {
+        const kept = gs.map((g) => { const o = g.open.filter((n) => n in starter); return { ...g, open: o, active: o.includes(g.active) ? g.active : o[0] ?? "" }; }).filter((g) => g.open.length > 0);
+        if (kept.length) return kept;
+        const first = Object.keys(starter)[0];
+        return [{ id: 1, open: [first], active: first }];
+      });
       setRun(null);
     }
     setConfirmReset(null);
   }
 
-  function openFile(name: string) { setOpen((o) => (o.includes(name) ? o : [...o, name])); setActive(name); }
-  function closeTab(name: string) {
-    setOpen((o) => { const n = o.filter((x) => x !== name); if (active === name) setActive(n[n.length - 1] ?? ""); return n; });
+  function openFile(name: string) { setGroups((gs) => openIn(gs, gs.some((g) => g.id === focusId) ? focusId : gs[0].id, name)); }
+  /** A file dropped into a new column: that column takes focus. */
+  function splitFile(d: Drag, at: number) {
+    const r = splitOut(groups, d, at);
+    setGroups(r.groups); setFocusId(r.id);
+  }
+  function closeColumn(gid: number) {
+    setGroups((gs) => (gs.length > 1 ? gs.filter((g) => g.id !== gid) : gs));
+    if (gid === focusId) setFocusId(groups.find((g) => g.id !== gid)?.id ?? 1);
   }
   function addFile() {
     if (!addingRef.current) return;
@@ -328,8 +357,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
     setFiles((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => k === oldName
       ? [n, lang === "java" || lang === "csharp" ? v.replace(new RegExp(`\\b(class|interface|enum|record|struct)\\s+${oldBase}\\b`), `$1 ${newBase}`) : v]
       : [k, v])));
-    setOpen((o) => o.map((x) => (x === oldName ? n : x)));
-    setActive((a) => (a === oldName ? n : a));
+    setGroups((gs) => renameIn(gs, oldName, n));
   }
 
   /** Restart the clock on this attempt (a fresh timed try at the same question). */
@@ -349,7 +377,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   function deleteFile(name: string) {
     if (name in (start?.challenge.files ?? {})) return;
     setFiles((f) => { const n = { ...f }; delete n[name]; return n; });
-    closeTab(name);
+    setGroups((gs) => removeEverywhere(gs, name));
   }
 
   /** Saves this language's draft, then opens the same concept in another language. */
@@ -428,7 +456,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               {guide && <button role="tab" className="ptab" aria-selected={left === "steps"} onClick={() => setLeft("steps")}>Steps{!guide.quiz.solved && <span className="h-1.5 w-1.5 rounded-full bg-accentfill" aria-label="Question waiting" />}</button>}
               <button role="tab" className="ptab" aria-selected={left === "hints"} onClick={() => setLeft("hints")}>Hints{hintLevel > 0 && <span className="chip !h-[18px] !px-1.5 !text-[10px]">{hintLevel}</span>}</button>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => setHintAsk(true)} disabled={busy !== null || settling || hintLevel >= 4 || hintsBlocked}
+            <button className="btn btn-secondary btn-sm" onClick={() => setHintAsk(true)} disabled={busy !== null || settling || frozen || hintLevel >= 4 || hintsBlocked}
               title={hintsBlocked ? `You've used your ${hintQuota?.limit ?? 5} hints for this hour` : hintLevel >= 3 ? "Shows the full solution and lowers mastery" : "Opt-in help. Costs a little mastery"}>
               {busy === "hint" ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
               {hintLevel >= 4 ? "No more hints" : hintsBlocked ? `Hints reset in ${hintMins} min` : hintLevel === 3 ? "Show solution" : "Need a hint?"}
@@ -513,23 +541,22 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                 aria-label={showDesc ? "Hide brief" : "Show brief"} aria-pressed={showDesc} title={`${showDesc ? "Hide" : "Show"} brief (⌘B)`}>
                 <PanelLeft size={16} />
               </button>
-              <LangMenu value={lang} onChange={switchLang} />
+              {view ? <span className="chip">{langLabel(lang)}</span> : <LangMenu value={lang} onChange={switchLang} />}
               <span aria-hidden className="mx-1 h-5 w-px bg-sep" />
-              <div className="flex min-w-0 flex-1 self-stretch overflow-x-auto" role="tablist" aria-label="Open files">
-                {open.map((n) => (
-                  <div key={n} role="tab" aria-selected={n === active} onClick={() => setActive(n)}
-                    className="ptab group shrink-0">
-                    <FileCode2 size={14} />{n}
-                    {diagnostics.some((d) => d.file === n && d.severity === "error") && <span className="h-1.5 w-1.5 rounded-full bg-bad" />}
-                    {open.length > 1 && <button aria-label={`Close ${n}`} onClick={(e) => { e.stopPropagation(); closeTab(n); }} className="opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"><X size={13} /></button>}
-                  </div>
-                ))}
+              <div className="min-w-0 flex-1 truncate text-[12.5px] text-label3 max-md:hidden">
+                {view ? "Read-only: your code and results from this attempt" : frozen ? "Submitted: your code is kept as it was" : "Drag files to reorder them or into a column to split the view"}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {start.startedAt && (
-                  <ChallengeClock key={start.startedAt} startedAt={start.startedAt} serverNow={start.serverNow} stopped={sheet === "result"}
+                {start.startedAt && !view && (
+                  <ChallengeClock key={start.startedAt} startedAt={start.startedAt} serverNow={start.serverNow} stopped={result !== null}
                     attemptNumber={start.attemptNumber} bestSeconds={start.bestSeconds} longestSeconds={start.longestSeconds} onReset={resetClock} />
                 )}
+                {view ? (
+                  <Link className="btn btn-primary btn-sm" href={`/learn/${concept}/practice?lang=${lang}&redo=${ch.id}`} title="Solve it again as practice (mastery unchanged)"><RotateCcw size={14} />Redo as practice</Link>
+                ) : frozen ? (<>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setSheet("result")}><Trophy size={14} />View result</button>
+                  <button className="btn btn-primary btn-sm" onClick={nextChallenge}>Next challenge<ArrowRight size={14} /></button>
+                </>) : (<>
                 <ResetMenu fileName={active} fileHasTemplate={fileHasTemplate} fileChanged={fileChanged} anyChanged={anyChanged}
                   onResetFile={() => setConfirmReset("file")} onResetAll={() => setConfirmReset("all")} disabled={busy !== null || settling} />
                 <button className="btn btn-secondary btn-sm" onClick={() => exec("main")} disabled={busy !== null || settling} title="Run (⌘↵)">
@@ -539,6 +566,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                   {busy === "tests" ? <Loader2 size={14} className="animate-spin" /> : <TestTube2 size={14} />}Run tests
                 </button>
                 <button className="btn btn-primary btn-sm" onClick={() => submit()} disabled={busy !== null || settling}>{busy === "submit" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}Submit</button>
+                </>)}
                 <button className="btn btn-icon btn-sm btn-secondary" onClick={() => toggleFocus(!focus)} aria-label={focus ? "Exit focus mode" : "Focus mode"} aria-pressed={focus} title={focus ? "Exit focus mode (Esc)" : "Focus mode (⌘⇧F)"}>
                   {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                 </button>
@@ -548,11 +576,11 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               <nav style={{ width: filesWidth }} className="hidden shrink-0 flex-col bg-card2 p-2 sm:flex" aria-label="Project files">
                 <div className="mb-1 flex items-center justify-between px-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-label3">
                   Files
-                  <button aria-label="New file" title="New file" onClick={() => { addingRef.current = true; setNewName(""); }} className="rounded p-0.5 hover:bg-fill"><Plus size={14} /></button>
+                  {!frozen && <button aria-label="New file" title="New file" onClick={() => { addingRef.current = true; setNewName(""); }} className="rounded p-0.5 hover:bg-fill"><Plus size={14} /></button>}
                 </div>
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
                   {fileNames.map((n) => {
-                    const mine = !(n in starter);
+                    const mine = !(n in starter) && !frozen;
                     if (renaming === n) {
                       return (
                         <input key={n} autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onFocus={(e) => e.currentTarget.select()}
@@ -565,6 +593,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                     return (
                       <div key={n} className={`group flex w-full items-center rounded-lg text-[13px] ${n === active ? "bg-fill font-semibold text-label" : "text-label2 hover:bg-fill hover:text-label"}`}>
                         <button onClick={() => openFile(n)} onDoubleClick={() => { if (mine) startRename(n); }}
+                          draggable onDragStart={(e) => { setFileTip(null); e.dataTransfer.setData("text/plain", n); e.dataTransfer.effectAllowed = "move"; setDrag({ name: n, from: null }); }} onDragEnd={() => setDrag(null)}
                           onMouseEnter={(e) => showTip(e.currentTarget)} onMouseLeave={() => setFileTip(null)} onFocus={(e) => showTip(e.currentTarget)} onBlur={() => setFileTip(null)}
                           className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
                           <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>
@@ -595,9 +624,30 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                     <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the Steps tab to start editing.
                   </p>
                 )}
-                <div className="min-h-0 flex-1">
-                  {active && files[active] !== undefined && <CodeEditor path={active} value={files[active]} onChange={(v) => onEdit(active, v)} diagnostics={diagnostics} files={files} readOnly={locked} />}
-                </div>
+                {view && detail && (
+                  <p role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
+                    <Eye size={13} className="shrink-0" />
+                    <span>Attempt {start.attemptNumber ? `#${start.attemptNumber}` : ""}{detail.at ? ` · ${new Date(detail.at).toLocaleString()}` : ""}</span>
+                    <b className={detail.passed === detail.total ? "text-ok" : "text-bad"}>{detail.passed}/{detail.total} tests passed</b>
+                    {start.practice ? <span className="chip">Practice</span> : <span className={`font-semibold tabular-nums ${detail.delta >= 0 ? "text-ok" : "text-bad"}`}>{detail.delta >= 0 ? "+" : ""}{Math.round(detail.delta * 100)} mastery</span>}
+                    <Link href="/profile#history" className="ml-auto font-medium text-accent hover:underline">Back to history</Link>
+                  </p>
+                )}
+                {!view && result && (
+                  <p role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
+                    {result.allPassed ? <Check size={13} className="shrink-0 text-ok" /> : <XCircle size={13} className="shrink-0 text-warn" />}
+                    <span>Submitted: {result.passed} of {result.total} tests passed. Your code is kept as it was; look around as long as you like.</span>
+                  </p>
+                )}
+                <EditorGroups groups={groups} focusId={focusGroup.id} files={files} diagnostics={diagnostics} readOnly={locked || frozen}
+                  drag={drag} setDrag={setDrag} onFocus={setFocusId}
+                  onSelect={(gid, name) => { setFocusId(gid); setGroups((gs) => openIn(gs, gid, name)); }}
+                  onClose={(gid, name) => setGroups((gs) => closeIn(gs, gid, name))}
+                  onMove={(d, to, index) => { setFocusId(to); setGroups((gs) => moveTab(gs, d, to, index)); }}
+                  onSplit={splitFile}
+                  onSplitActive={(gid) => { const g = groups.find((x) => x.id === gid); if (g?.active) splitFile({ name: g.active, from: null }, groups.indexOf(g) + 1); }}
+                  onCloseGroup={closeColumn}
+                  onEdit={onEdit} />
               </div>
             </div>
           </div>
@@ -619,7 +669,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
             </div>
             {consoleOpen === "1" && <div className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed">
               {bottom === "tests" ? (
-                <TestPanel key={runSeq} run={testRun} names={ch.testNames}
+                <TestPanel key={runSeq} run={testRun} names={ch.testNames} animate={playedSeq.current !== runSeq} onPlayed={() => { playedSeq.current = runSeq; }}
                   running={busy === "tests" || busy === "submit"} submitting={busy === "submit"} />
               ) : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
                 : (
@@ -714,7 +764,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
 
       {/* ---------- Result sheet ---------- */}
       {party && sheet === "result" && <Confetti running onDone={endParty} />}
-      {sheet === "result" && result && <ResultSheet r={result} concept={concept} lang={lang} onNext={nextChallenge} onHome={() => router.push("/dashboard")} />}
+      {sheet === "result" && result && <ResultSheet r={result} concept={concept} lang={lang} onNext={nextChallenge} onHome={() => router.push("/dashboard")} onClose={() => { setSheet(null); setParty(false); }} />}
     </AppShell>
   );
 }
@@ -806,12 +856,12 @@ function RevealCard({ reveal }: { reveal: PatternReveal }) {
   );
 }
 
-function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; concept: string; lang: LangId; onNext: () => void; onHome: () => void }) {
+function ResultSheet({ r, concept, lang, onNext, onHome, onClose }: { r: SubmitResp; concept: string; lang: LangId; onNext: () => void; onHome: () => void; onClose: () => void }) {
   const [shown, setShown] = useState(r.scoreBefore);
   useEffect(() => { const t = setTimeout(() => setShown(r.scoreAfter), 350); return () => clearTimeout(t); }, [r.scoreAfter]);
   const up = r.delta >= 0;
   return (
-    <Overlay onClose={() => {}}>
+    <Overlay onClose={onClose}>
       <div className="sheet pop max-h-[92vh] w-full max-w-lg overflow-auto p-7">
         <div className="mb-6 flex flex-col items-center text-center">
           {r.mastered ? <Trophy className="mb-3 text-ok" size={34} /> : r.allPassed ? <Check className="mb-3 rounded-full bg-oksoft p-1.5 text-ok" size={34} /> : <XCircle className="mb-3 text-warn" size={34} />}

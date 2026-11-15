@@ -2,15 +2,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Clock, Code2, Eye, FileCode2, Flame, Layers, ListTree, Loader2, Pencil,
+  ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronDown, Clock, Eye, Flame, Layers, ListTree, Loader2, Pencil,
   RotateCcw, Timer, Trophy, User, X, XCircle,
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import AreaChart from "@/components/AreaChart";
-import Markdown from "@/components/Markdown";
-import { api, type AttemptDetail, type ChallengeGroup, type HistoryItem, type HistoryPage, type HistorySummary } from "@/lib/api";
+import { api, type ChallengeGroup, type HistoryItem, type HistoryPage, type HistorySummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { highlight } from "@/lib/highlight";
 import { LANGS, langLabel } from "@/lib/lang";
 import { useStats } from "@/lib/stats";
 import { duration } from "@/lib/time";
@@ -30,7 +28,6 @@ export default function Profile() {
   const [metric, setMetric] = useState<"minutes" | "solved" | "submitted">("minutes");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [view, setView] = useState<"timeline" | "challenge">("timeline");
-  const [viewing, setViewing] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -108,11 +105,10 @@ export default function Profile() {
         </div>
         <FilterBar filters={filters} onChange={setFilters} topics={sum?.byConcept ?? []} />
         {view === "timeline"
-          ? <Timeline key={qs(filters)} filters={filters} onView={setViewing} />
-          : <ByChallenge key={qs(filters)} filters={filters} onView={setViewing} />}
+          ? <Timeline key={qs(filters)} filters={filters} />
+          : <ByChallenge key={qs(filters)} filters={filters} />}
       </section>
 
-      {viewing !== null && <SubmissionViewer id={viewing} onClose={() => setViewing(null)} />}
     </AppShell>
   );
 }
@@ -248,7 +244,7 @@ const dayLabel = (iso: string) => {
 };
 
 /** Timeline: submissions grouped by day, newest first, 20 per page. */
-function Timeline({ filters, onView }: { filters: Filters; onView: (id: number) => void }) {
+function Timeline({ filters }: { filters: Filters }) {
   const [page, setPage] = useState(0);
   const [data, setData] = useState<{ page: number; res: HistoryPage } | null>(null);
   const [error, setError] = useState("");
@@ -272,7 +268,7 @@ function Timeline({ filters, onView }: { filters: Filters; onView: (id: number) 
             {days.map((list) => (
               <div key={list[0].at}>
                 <p className="eyebrow mb-2">{dayLabel(list[0].at)}</p>
-                <div className="card divide-y divide-[var(--sep)]">{list.map((h) => <HistoryRow key={h.attemptId} h={h} onView={() => onView(h.attemptId)} />)}</div>
+                <div className="card divide-y divide-[var(--sep)]">{list.map((h) => <HistoryRow key={h.attemptId} h={h} />)}</div>
               </div>
             ))}
           </div>
@@ -289,7 +285,7 @@ function Timeline({ filters, onView }: { filters: Filters; onView: (id: number) 
 }
 
 /** By question: one card per challenge with every attempt, the best time and how often it was solved. */
-function ByChallenge({ filters, onView }: { filters: Filters; onView: (id: number) => void }) {
+function ByChallenge({ filters }: { filters: Filters }) {
   const [groups, setGroups] = useState<ChallengeGroup[] | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   useEffect(() => { api<ChallengeGroup[]>(`/history/challenges?x=1${qs(filters)}`).then(setGroups).catch(() => setGroups([])); }, [filters]);
@@ -314,7 +310,7 @@ function ByChallenge({ filters, onView }: { filters: Filters; onView: (id: numbe
             </button>
             {isOpen && (
               <div className="divide-y divide-[var(--sep)] border-t border-sep bg-card2">
-                {g.attempts.map((h) => <HistoryRow key={h.attemptId} h={h} onView={() => onView(h.attemptId)} compact />)}
+                {g.attempts.map((h) => <HistoryRow key={h.attemptId} h={h} compact />)}
               </div>
             )}
           </div>
@@ -324,7 +320,7 @@ function ByChallenge({ filters, onView }: { filters: Filters; onView: (id: numbe
   );
 }
 
-function HistoryRow({ h, onView, compact = false }: { h: HistoryItem; onView: () => void; compact?: boolean }) {
+function HistoryRow({ h, compact = false }: { h: HistoryItem; compact?: boolean }) {
   const ok = h.total > 0 && h.passed === h.total;
   const when = new Date(h.at).toLocaleString(undefined, compact ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } : { hour: "numeric", minute: "2-digit" });
   return (
@@ -340,62 +336,10 @@ function HistoryRow({ h, onView, compact = false }: { h: HistoryItem; onView: ()
       {h.practice ? <span className="chip">Practice</span>
         : <span className={`w-10 text-right text-xs font-semibold tabular-nums ${h.delta >= 0 ? "text-ok" : "text-bad"}`}>{h.delta >= 0 ? "+" : ""}{Math.round(h.delta * 100)}</span>}
       <div className="flex shrink-0 gap-1.5">
-        <button className="btn btn-secondary btn-sm" onClick={onView}><Eye size={14} />View</button>
+        <Link className="btn btn-secondary btn-sm" href={`/learn/${h.concept}/practice?lang=${h.language}&view=${h.attemptId}`} title="Open it in the challenge page with your code and results"><Eye size={14} />View</Link>
         <Link className="btn btn-secondary btn-sm" href={`/learn/${h.concept}/practice?lang=${h.language}&redo=${h.challengeId}`} title="Solve it again as practice (mastery unchanged)">
           <RotateCcw size={14} />Redo
         </Link>
-      </div>
-    </div>
-  );
-}
-
-/** A past submission: the brief and the code that was submitted, read-only. */
-function SubmissionViewer({ id, onClose }: { id: number; onClose: () => void }) {
-  const [d, setD] = useState<AttemptDetail | null>(null);
-  const [file, setFile] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    api<AttemptDetail>(`/attempts/${id}`).then((r) => { setD(r); setFile(Object.keys(r.files).sort()[0] ?? ""); }).catch((e) => setError(e.message));
-  }, [id]);
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
-  const names = d ? Object.keys(d.files).sort() : [];
-  return (
-    <div className="fade fixed inset-0 z-50 grid place-items-center bg-black/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Submission"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="pop flex max-h-[88vh] w-full max-w-[920px] flex-col overflow-hidden rounded-[22px] border border-sep bg-card shadow-[var(--shadow-lg)]">
-        <div className="flex items-start justify-between gap-4 border-b border-sep px-6 py-4">
-          <div className="min-w-0">
-            <p className="truncate text-[18px] font-semibold tracking-tight">{d?.challenge.title ?? "Loading…"}</p>
-            {d && <p className="text-[12.5px] text-label3">{langLabel(d.challenge.language)} · {d.passed}/{d.total} tests{d.practice ? " · Practice" : ""}{d.submittedAt ? ` · ${new Date(d.submittedAt).toLocaleString()}` : ""}</p>}
-          </div>
-          <div className="flex shrink-0 gap-2">
-            {d && <Link className="btn btn-primary btn-sm" href={`/learn/${d.challenge.concept}/practice?lang=${d.challenge.language}&redo=${d.challenge.id}`}><RotateCcw size={14} />Redo</Link>}
-            <button className="btn btn-icon btn-sm btn-ghost" onClick={onClose} aria-label="Close"><X size={16} /></button>
-          </div>
-        </div>
-        {error ? <p className="p-6 text-bad">{error}</p> : !d ? <div className="grid place-items-center p-16"><Loader2 className="animate-spin text-accent" /></div> : (
-          <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-            <div className="min-h-0 overflow-auto border-sep p-5 max-md:border-b md:border-r"><Markdown compact>{d.challenge.descriptionMd}</Markdown></div>
-            <div className="flex min-h-0 flex-col">
-              <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-sep px-3 py-2" role="tablist" aria-label="Files">
-                {names.map((n) => (
-                  <button key={n} role="tab" aria-selected={n === file} onClick={() => setFile(n)}
-                    className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12.5px] ${n === file ? "bg-fill font-semibold" : "text-label2 hover:bg-fill"}`}>
-                    <FileCode2 size={13} />{n}
-                  </button>
-                ))}
-              </div>
-              <pre className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed">
-                {names.length === 0 ? <span className="flex items-center gap-2 font-sans text-label3"><Code2 size={14} />No code was saved for this attempt.</span>
-                  : <code>{highlight(d.files[file] ?? "", d.challenge.language)}</code>}
-              </pre>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

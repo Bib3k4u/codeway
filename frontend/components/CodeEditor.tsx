@@ -72,7 +72,13 @@ export default function CodeEditor({ path, value, onChange, diagnostics, files, 
       height="100%" language={monacoLanguage(path)} path={path} value={value}
       theme={resolvedTheme === "dark" ? "codeway-dark" : "codeway-light"}
       beforeMount={beforeMount}
-      onMount={(_, monaco) => { monacoRef.current = monaco; applyMarkers(); }}
+      // two columns can show the same file, so closing one must not dispose the model the other still uses
+      keepCurrentModel
+      onMount={(editor, monaco) => {
+        monacoRef.current = monaco; applyMarkers();
+        // a model kept from an earlier challenge's file of the same name must not show its old text
+        if (editor.getValue() !== value) editor.getModel()?.setValue(value);
+      }}
       onChange={(v) => onChange(v ?? "")}
       loading={<div className="skeleton m-6 h-4 w-48" />}
       options={{

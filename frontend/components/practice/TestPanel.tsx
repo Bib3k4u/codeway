@@ -11,16 +11,20 @@ export const STEP_MS = 260;
  * a time with a running "Tests k/n" counter; a failed test shows the message of what it expected. Mount with a new `key` per
  * run to replay the animation.
  */
-export default function TestPanel({ run, names, running, submitting }: {
+export default function TestPanel({ run, names, running, submitting, animate = true, onPlayed }: {
   run: RunResp | null; names: string[]; running: boolean; submitting: boolean;
+  /** play the one-by-one reveal; false shows the results at once (coming back to the tab, or a past attempt) */
+  animate?: boolean; onPlayed?: () => void;
 }) {
   const tests = run?.compiled ? run.tests : [];
   const total = tests.length || names.length;
-  const [shown, setShown] = useState(0);
+  const [shown, setShown] = useState(animate ? 0 : tests.length);
   useEffect(() => {
-    if (!tests.length) return;
+    if (!animate || !tests.length) return;
+    onPlayed?.();   // the reveal for this run has started: later visits to the tab skip it
     const id = setInterval(() => setShown((n) => { if (n + 1 >= tests.length) clearInterval(id); return Math.min(tests.length, n + 1); }), STEP_MS);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tests.length]);
 
   const done = tests.length > 0 && shown >= tests.length;

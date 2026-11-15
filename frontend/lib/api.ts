@@ -78,9 +78,11 @@ export interface HistorySummary {
   totals: { attempts: number; solved: number; challenges: number; minutes: number; avgMinutes: number };
 }
 export interface HistoryPage { items: HistoryItem[]; page: number; size: number; total: number; pages: number }
-export interface AttemptDetail {
+/** A past attempt: what the challenge page needs to show it again with the learner's code and results. */
+export interface AttemptDetail extends TimeRecord {
   attemptId: number; files: Files; passed: number; total: number; delta: number; practice: boolean; submittedAt: string | null;
-  challenge: { id: number; title: string; descriptionMd: string; language: string; concept: string; difficulty: number };
+  challenge: Challenge & { concept: string; language: string };
+  hints?: Hint[]; lastRun?: RunResp; guide?: Guide; startedAt?: string; seconds?: number;
 }
 /** Hints a learner may still ask for in the current rolling hour. */
 export interface HintQuota { limit: number; used: number; left: number; resetSeconds: number }
