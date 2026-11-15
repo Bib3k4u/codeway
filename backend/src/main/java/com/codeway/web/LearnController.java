@@ -16,7 +16,6 @@ public class LearnController {
     public record SubmitReq(Map<String, String> files, Integer confidence, Boolean finish) {}
     public record HintReq(Map<String, String> files, String failures) {}
     public record DraftReq(Map<String, String> files) {}
-    public record RevealReq(Integer index) {}
     public record QuizReq(String option) {}
     public record TelemetryReq(List<AttemptService.Event> events) {}
 
@@ -56,6 +55,7 @@ public class LearnController {
             boolean practice = catalog.practiceOpen(language, c.id());
             row.put("id", c.id()); row.put("title", c.title()); row.put("summary", c.summary()); row.put("symbol", c.symbol());
             row.put("track", c.track()); if (c.group() != null) row.put("group", c.group());
+            row.put("requires", requires(c.id()));
             row.put("available", practice && challenges.hasContent(language, c.id()));
             row.put("score", AttemptService.round(m.score)); row.put("streak", m.streak);
             row.put("progress", m.attemptsCount > 0 ? AttemptService.round(m.score) : 0.0);
@@ -67,6 +67,11 @@ public class LearnController {
         return out;
     }
 
+    /** The lessons to know before this one, as {id, title}. */
+    private List<Map<String, String>> requires(String concept) {
+        return catalog.requires(concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList();
+    }
+
     /** The learning path, in order. */
     @GetMapping("/tracks")
     public List<ConceptCatalog.Track> tracks() { return catalog.tracks(); }
@@ -76,7 +81,7 @@ public class LearnController {
         Lesson l = lessons.get(language, concept);
         var c = catalog.find(language, concept).orElseThrow();
         return Map.of("language", language, "concept", concept, "title", c.title(), "contentMd", l.contentMd, "source", l.source,
-                "track", c.track(), "practice", catalog.practiceOpen(language, concept));
+                "track", c.track(), "practice", catalog.practiceOpen(language, concept), "requires", requires(concept));
     }
 
     @PostMapping("/challenges/next")
@@ -103,12 +108,6 @@ public class LearnController {
     @PostMapping("/attempts/{id}/quiz")
     public Map<String, Object> quiz(HttpServletRequest req, @PathVariable Long id, @RequestBody QuizReq b) {
         return attempts.answerQuiz(uid(req), id, b.option());
-    }
-
-    /** Reveal one hidden test of an open attempt (costs a little mastery). */
-    @PostMapping("/attempts/{id}/reveal")
-    public Map<String, Object> reveal(HttpServletRequest req, @PathVariable Long id, @RequestBody RevealReq b) {
-        return attempts.reveal(uid(req), id, b.index() == null ? -1 : b.index());
     }
 
     /** Submission history, newest first, paginated, with optional filters. */

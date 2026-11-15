@@ -125,7 +125,7 @@ class AiUsageLimitsTest {
 
     @Test void aStoredLessonIsReusedWithoutAnyAiCall() {
         var t = new Lessons();
-        Lesson l = new Lesson(); l.language = "java"; l.concept = "strategy"; l.source = "ai"; l.contentMd = "## Stored";
+        Lesson l = new Lesson(); l.language = "java"; l.concept = "strategy"; l.source = "ai"; l.version = Teaching.LESSON_VERSION; l.contentMd = "## Stored";
         t.store.put("java/strategy", l);
         for (int i = 0; i < 5; i++) assertEquals("## Stored", t.service.get("java", "strategy").contentMd);
         verify(t.ai, never()).chat(anyString(), anyString(), anyString(), anyBoolean());
@@ -133,7 +133,7 @@ class AiUsageLimitsTest {
 
     @Test void anotherLanguageIsTranslatedFromTheExistingLessonNotWrittenFromScratch() {
         var t = new Lessons();
-        Lesson l = new Lesson(); l.language = "java"; l.concept = "strategy"; l.source = "ai"; l.contentMd = "## The problem\n\nJava version";
+        Lesson l = new Lesson(); l.language = "java"; l.concept = "strategy"; l.source = "ai"; l.version = Teaching.LESSON_VERSION; l.contentMd = "## The problem\n\nJava version";
         t.store.put("java/strategy", l);
         t.aiReturns("## The problem\n\nPython version", 0);
         assertEquals("## The problem\n\nPython version", t.service.get("python", "strategy").contentMd);
@@ -141,6 +141,35 @@ class AiUsageLimitsTest {
         verify(t.ai).chat(anyString(), anyString(), prompt.capture(), anyBoolean());
         assertTrue(prompt.getValue().startsWith("Rewrite this Java lesson for Python"), prompt.getValue());
         assertTrue(prompt.getValue().contains("Java version"));
+    }
+
+    @Test void aLessonWrittenWithAnOlderPromptIsWrittenAgainOnceAndThenReused() {
+        var t = new Lessons();
+        Lesson l = new Lesson(); l.language = "java"; l.concept = "polymorphism"; l.source = "ai"; l.version = null; l.contentMd = "## Old lesson";
+        t.store.put("java/polymorphism", l);
+        t.aiReturns("## Before you start\n\nNew lesson", 0);
+        for (int i = 0; i < 4; i++) assertEquals("## Before you start\n\nNew lesson", t.service.get("java", "polymorphism").contentMd);
+        verify(t.ai, times(1)).chat(anyString(), anyString(), anyString(), anyBoolean());
+        assertEquals(Teaching.LESSON_VERSION, t.store.get("java/polymorphism").version);
+    }
+
+    @Test void anOlderLessonIsKeptWhenTheAiCannotWriteTheNewOne() {
+        var t = new Lessons();
+        Lesson l = new Lesson(); l.language = "java"; l.concept = "polymorphism"; l.source = "ai"; l.contentMd = "## Old lesson";
+        t.store.put("java/polymorphism", l);
+        when(t.ai.chat(anyString(), anyString(), anyString(), anyBoolean())).thenThrow(new IllegalStateException("AI request failed (500)"));
+        assertEquals("## Old lesson", t.service.get("java", "polymorphism").contentMd);
+        assertEquals("ai", t.store.get("java/polymorphism").source);
+    }
+
+    @Test void theOopLessonPromptsAskForPrerequisitesAndTheNeighbouringIdea() {
+        var t = new Lessons();
+        var c = new ConceptCatalog();
+        String poly = t.service.lessonPrompt(c.find("java", "polymorphism").orElseThrow(), "java");
+        assertTrue(poly.contains("Before you start") && poly.contains("Inheritance vs polymorphism") && poly.contains("New words"), poly);
+        assertTrue(poly.contains("Inheritance (") && poly.contains("Classes & Objects ("), "prerequisites are named");
+        assertTrue(poly.contains("do not use or mention them: abstract classes"), "abstract classes come later");
+        assertTrue(t.service.lessonPrompt(c.find("java", "classes-objects").orElseThrow(), "java").contains("basic syntax"), "first lesson needs only syntax");
     }
 
     @Test void aFailedGenerationIsNotRetriedOnEveryView() {

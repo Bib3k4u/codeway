@@ -21,9 +21,23 @@ public class ChallengeService {
     private final CodeRunner runner;
     private final AiClient ai;
     private final ConceptCatalog catalog;
+    private final LessonService lessons;
 
-    public ChallengeService(ChallengeRepo challenges, AttemptRepo attempts, CodeRunner runner, AiClient ai, ConceptCatalog catalog) {
-        this.challenges = challenges; this.attempts = attempts; this.runner = runner; this.ai = ai; this.catalog = catalog;
+    public ChallengeService(ChallengeRepo challenges, AttemptRepo attempts, CodeRunner runner, AiClient ai, ConceptCatalog catalog, LessonService lessons) {
+        this.challenges = challenges; this.attempts = attempts; this.runner = runner; this.ai = ai; this.catalog = catalog; this.lessons = lessons;
+    }
+
+    /**
+     * Challenges the AI made under older rules (before lessons and challenges were kept in step) are not served any more; they stay in the
+     * database. Hand-written seeds and guided pattern challenges are not affected.
+     */
+    static boolean current(Challenge c) {
+        boolean generated = "ai".equals(c.origin) || "ai-translation".equals(c.origin);
+        return !generated || c.guideJson != null || (c.contentVersion != null && c.contentVersion >= Teaching.CONTENT_VERSION);
+    }
+
+    private List<Challenge> bank(String language, String concept) {
+        return challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).stream().filter(ChallengeService::current).toList();
     }
 
     /** Adds the five principle options and our answer key to a guide that only has the question and explanation. */
@@ -44,12 +58,12 @@ public class ChallengeService {
 
     public boolean hasContent(String language, String concept) {
         if (!catalog.practiceOpen(language, concept)) return false;
-        return ai.isConfigured() || !challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).isEmpty();
+        return ai.isConfigured() || !bank(language, concept).isEmpty();
     }
 
     /** Pipeline: bank (unseen, exact match) -> generate+validate -> nearest unseen -> nearest seen. */
     public Challenge pick(Long userId, String language, String concept, int difficulty, String scaffolding) {
-        var bank = challenges.findByLanguageAndConceptAndValidatedTrue(language, concept);
+        var bank = bank(language, concept);
         Map<Long, Long> lastSeen = new HashMap<>();
         for (Attempt a : attempts.findByUserId(userId)) {
             long t = a.startedAt.toEpochMilli();
@@ -99,31 +113,119 @@ public class ChallengeService {
         String avoid = bank.stream().map(x -> x.title).collect(Collectors.joining("; "));
         Optional<Challenge> anchor = catalog.isGuided(concept) ? anchor(concept) : Optional.empty();
         if (catalog.isGuided(concept) && anchor.isEmpty()) return null;
+        // The learner reads this lesson before practising, so the exercise is written from it, not around it.
+        String lesson = anchor.isPresent() ? null : lessonFor(language, concept);
+        String feedback = "";
         for (int attempt = 1; attempt <= MAX_GENERATION_TRIES; attempt++) {
             try {
                 Lang lang = Lang.of(language);
                 String prompt = anchor.isPresent() ? GuidedPrompts.variant(lang, c, difficulty, scaffolding, avoid, anchor.get(), langRules(lang))
-                        : userPrompt(lang, c, difficulty, scaffolding, avoid);
-                String raw = ai.chat(ai.model(), system(lang), prompt, true);
+                        : userPrompt(lang, c, difficulty, scaffolding, avoid, teachingRules(c, lesson));
+                String raw = ai.chat(ai.model(), system(lang), prompt + feedback, true);
                 Challenge ch = parse(raw, language, concept, difficulty, scaffolding);
                 if (anchor.isPresent()) {
                     if (ch.guideJson == null) throw new IllegalStateException("missing guide");
                     ch.guideJson = GuidedPrompts.normalize(ch.guideJson, concept);   // our quiz options and answer key
                     ch.familyId = null;
                 }
-                String problem = validate(ch);
+                String problem = validate(ch, lesson);
+                if (problem == null && anchor.isEmpty()) problem = review(ch, c, lesson);
                 if (problem == null) {
                     ch.validated = true;
                     ch.origin = "ai";
+                    ch.contentVersion = Teaching.CONTENT_VERSION;
                     return challenges.save(ch);
                 }
                 System.err.println("[challenge] generation " + attempt + " rejected: " + problem);
+                feedback = "\n\nYour previous attempt was rejected: " + (problem.length() > 1500 ? problem.substring(0, 1500) : problem)
+                        + "\nFix exactly that and return the complete JSON again.";
+            } catch (AiClient.QuotaExceeded q) {
+                return null;                                     // today's AI allowance is used up: the caller falls back to the bank
             } catch (Exception e) {
                 System.err.println("[challenge] generation " + attempt + " failed: " + e.getMessage());
             }
         }
         return null;
     }
+
+    /** The lesson text the learner reads for this concept (null if it can't be had). */
+    private String lessonFor(String language, String concept) {
+        try { return lessons.get(language, concept).contentMd; } catch (Exception e) { return null; }
+    }
+
+    /**
+     * What the learner knows and what the exercise must and must not rely on. Hand-written to stop the failures learners reported:
+     * exercises that need ideas taught later or never, ask to create what is already given, or leave requirements to guesswork.
+     */
+    private String teachingRules(ConceptCatalog.Concept c, String lesson) {
+        String before = catalog.requires(c.id()).stream().map(ConceptCatalog.Concept::title).collect(Collectors.joining(", "));
+        int here = catalog.position(c.id());
+        String later = catalog.list("java").stream().filter(x -> x.track().equals(c.track()) && catalog.position(x.id()) > here)
+                .map(ConceptCatalog.Concept::title).collect(Collectors.joining(", "));
+        Teaching.Note note = Teaching.note(c.id());
+        StringBuilder sb = new StringBuilder("""
+                Teaching rules. They matter more than anything else, because the learner cannot leave this page to look things up:
+                1. The learner has read ONLY the lesson below%s. Use only what it teaches (plus basic syntax: variables, methods, printing).%s%s
+                2. Do not depend on library calls or language features the lesson does not show: reflection, getClass(), getSimpleName(), instanceof,
+                   streams, lambdas, generics tricks and the like. If the printed output needs something like a type name, make the learner write it
+                   (for example each class returns its own name from a method) instead of discovering it with a library call.
+                3. If you really need a small standard-library helper the lesson does not cover (for example String.format, StringBuilder, List.of,
+                   Math.round, a for-each loop, throwing an exception), add a section "## New in this challenge" to descriptionMd that names it, says in
+                   one sentence what it does, and shows one tiny correct example. Never describe anything you are not certain about. If nothing is new, leave the section out.
+                4. descriptionMd starts with "## Before you start": a short line naming the concepts needed (%s), or "basic syntax only".
+                5. Say plainly what is provided and what the learner writes. Never tell the learner to "create" a class, method or file that already exists
+                   in starterFiles: say it is provided. Give a "## Provided for you" list (every file or class already in the starter, with what it does) and put each
+                   thing the learner must write in "## Requirements" as a numbered task that matches a TODO in the starter, in the same order.
+                6. Be exact about the demo in the main file: concrete steps such as "create a Dog and a Cat and put them in variables of type Animal", never
+                   a vague "create some Animal objects". Do not ask the learner to create objects of a type that is not meant to be created directly.
+                7. Everything the tests check is stated in descriptionMd: exact output text, formats, method names, parameters and what is thrown. Nothing is left to guess.
+                8. The learner sees the NAME of every test (never its code), so each name says in plain words what is checked, e.g. "A Dog greets with Woof!",
+                   never "Test 1". A name must not reveal more than the description already says.
+                """.formatted(lesson == null ? "" : " (given below)", note != null && note.avoid() != null ? " Do not use these, they come later: " + note.avoid() + "." : "",
+                later.isBlank() ? "" : " Not yet taught: " + later + ".", before.isBlank() ? "basic syntax only" : before));
+        if (lesson != null) sb.append("\n--- LESSON THE LEARNER HAS JUST READ ---\n").append(lesson.length() > 7000 ? lesson.substring(0, 7000) : lesson).append("\n--- END OF LESSON ---\n");
+        return sb.toString();
+    }
+
+    /**
+     * A second look by the model at a finished, working exercise, answering the questions learners actually raised. Costs one AI call per
+     * exercise that is generated (exercises are shared). Null when it passes (or the check could not be made), otherwise what to fix.
+     */
+    private String review(Challenge ch, ConceptCatalog.Concept c, String lesson) {
+        try {
+            String prompt = """
+                    You check a programming exercise for a beginner before it is shown. Be strict and literal.
+                    Concept practised: %s. The learner has read only this lesson (plus basic syntax):
+                    --- LESSON ---
+                    %s
+                    --- END ---
+                    EXERCISE DESCRIPTION (what the learner reads):
+                    %s
+
+                    STARTER FILES (what the learner starts with): %s
+                    TEST NAMES (the learner sees only these): %s
+                    REFERENCE SOLUTION (not shown to the learner): %s
+
+                    Answer these. Any "yes" is a problem.
+                    1. Does the exercise need an idea, keyword, class or library call that neither the lesson nor the description's "New in this challenge" section explains?
+                    2. Does the description tell the learner to create something that already exists in the starter files?
+                    3. Is any rule the tests check (names, signatures, output text, format, exceptions) missing or vague in the description?
+                    4. Does the description contradict the starter files, the example output or itself?
+                    5. Is any statement in the description untrue for the language, or any explanation in "New in this challenge" wrong?
+                    Return JSON: {"problems": ["one short sentence per problem, saying exactly what to change"]}. Use an empty list if there are none.
+                    """.formatted(c.title(), lesson == null ? "(not available)" : (lesson.length() > 5000 ? lesson.substring(0, 5000) : lesson), ch.descriptionMd,
+                    cut(Json.files(ch.starterFilesJson).toString(), 5000), Json.strings(ch.testNamesJson), cut(Json.files(ch.referenceSolutionJson).toString(), 5000));
+            JsonNode n = Json.M.readTree(ai.chat(ai.model(), "You are a meticulous reviewer of beginner programming exercises. You reply with a single JSON object.", prompt, true));
+            List<String> problems = new ArrayList<>();
+            n.path("problems").forEach(p -> { if (!p.asText().isBlank()) problems.add(p.asText()); });
+            return problems.isEmpty() ? null : "The reviewer found: " + String.join(" | ", problems);
+        } catch (Exception e) {
+            System.err.println("[challenge] review skipped: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String cut(String s, int max) { return s.length() > max ? s.substring(0, max) + "..." : s; }
 
     // ---- the same exercise in another language ----
     /** The family a challenge belongs to: itself, or the challenge it was translated from. */
@@ -150,10 +252,11 @@ public class ChallengeService {
                 ch.guideJson = withSteps(src.guideJson, raw);   // quiz and reveal are language-neutral; the steps are re-worded for this language's names
                 String problem = validate(ch);
                 if (problem == null) {
-                    ch.validated = true; ch.origin = "ai-translation"; ch.familyId = fam;
+                    ch.validated = true; ch.origin = "ai-translation"; ch.familyId = fam; ch.contentVersion = Teaching.CONTENT_VERSION;
                     return challenges.save(ch);
                 }
                 System.err.println("[challenge] translation " + attempt + " rejected: " + problem);
+                if (problem.contains("is not installed on this machine")) return null;   // no toolchain here: asking the AI again cannot help
                 feedback = "\n\nYour previous translation was rejected when it was compiled and run: " + (problem.length() > 1200 ? problem.substring(0, 1200) : problem)
                         + "\nFix exactly that and return the complete JSON again.";
             } catch (Exception e) {
@@ -208,7 +311,8 @@ public class ChallengeService {
                 - Where the source uses a lambda or anonymous class for a single-method interface, write a small named class (or, in JavaScript, an object)
                   that has that method, in the starter's stubs, the reference and the tests alike, so every call site is written `thing.method(args)` and never
                   calls a bare function. Interfaces become abstract base classes (Python: abc or a plain base class; C++: a class with a virtual method and a
-                  virtual destructor; hold implementations by std::shared_ptr or std::unique_ptr; JavaScript: a base class that throws "not implemented").
+                  virtual destructor; hold implementations by std::shared_ptr or std::unique_ptr; JavaScript: a base class that throws "not implemented"; C#: an `interface` named
+                  with a leading I, for example IShippingRule).
                 - Also return the key "steps": the same steps, same count and order, with every class, method and file name, signature and example
                   rewritten for the target language exactly as your starterFiles and tests use them (so a learner can follow the step text literally).
                 - Keep EVERY test name exactly as in the source, including its "Guard:" or "S1:", "S2:"... prefix and order. The starter is
@@ -216,69 +320,11 @@ public class ChallengeService {
                 """);
     }
 
-    /** Index just past the statement starting at {@code start}: where its parentheses balance again. */
-    static int statementEnd(String[] lines, int start) {
-        int depth = 0; boolean opened = false;
-        for (int i = start; i < lines.length; i++) {
-            boolean inStr = false; char q = 0;
-            String l = lines[i];
-            for (int j = 0; j < l.length(); j++) {
-                char c = l.charAt(j);
-                if (inStr) { if (c == '\\') j++; else if (c == q) inStr = false; continue; }
-                if (c == '"' || c == '\'' || c == '`') { inStr = true; q = c; }
-                else if (c == '(') { depth++; opened = true; }
-                else if (c == ')') depth--;
-            }
-            if (opened && depth <= 0) return i + 1;
-        }
-        return Math.min(lines.length, start + 1);
-    }
-
-    // ---- visible examples vs hidden tests ----
-    /** How many tests (the first ones) are shown as worked examples; the rest stay hidden until revealed. */
-    public static int visibleCount(int total) { return total <= 1 ? total : Math.max(1, Math.min(3, total / 2)); }
-
-    /** Guided challenges have no hidden tests: the tests are the steps, and all of them can be read. */
-    public static int visibleCount(Challenge ch, int total) { return ch != null && ch.guideJson != null ? total : visibleCount(total); }
-
-    /**
-     * Source snippets of the visible tests, so learners can read what is checked. For Java, JavaScript and C++ a test
-     * is its run(...) call and the lambda after it; in Python a test may use a helper def written above the call.
-     */
-    public static List<Map<String, String>> examples(Challenge ch) {
-        List<String> names = testNames(ch);
-        int n = visibleCount(ch, names.size());
-        Lang lang = Lang.of(ch.language);
-        String src = Json.files(ch.testsJson).getOrDefault(lang.testFile, "");
-        String[] lines = src.split("\n", -1);
-        List<Integer> calls = new ArrayList<>();
-        for (int i = 0; i < lines.length; i++) if (lines[i].contains(lang.testCall)) calls.add(i);
-        List<Map<String, String>> out = new ArrayList<>();
-        for (int k = 0; k < n && k < names.size(); k++) {
-            String name = names.get(k);
-            int at = -1;
-            for (int c : calls) if (lines[c].contains(name)) { at = c; break; }
-            String code = "";
-            if (at >= 0) {
-                int idx = calls.indexOf(at);
-                int from = at, to;
-                if (lang == Lang.PYTHON) {
-                    // a helper def written just above the call belongs to this test
-                    from = idx > 0 ? calls.get(idx - 1) + 1 : at;
-                    while (from < at && (lines[from].isBlank() || lines[from].startsWith("import") || lines[from].startsWith("from "))) from++;
-                }
-                to = statementEnd(lines, at);
-                List<String> block = new ArrayList<>(Arrays.asList(lines).subList(from, Math.min(to, from + 16)));
-                if (to - from > 16) block.add("    ...");
-                code = String.join("\n", block).stripIndent().strip();
-            }
-            out.add(Map.of("name", name, "code", code));
-        }
-        return out;
-    }
-
     /** Returns null when the challenge is sound, otherwise the reason it was rejected. */
-    public String validate(Challenge ch) {
+    public String validate(Challenge ch) { return validate(ch, null); }
+
+    /** As {@link #validate(Challenge)}; with the lesson the learner reads, it also rejects an exercise that needs something the lesson does not teach. */
+    public String validate(Challenge ch, String lessonMd) {
         Map<String, String> tests = Json.files(ch.testsJson);
         Map<String, String> starter = Json.files(ch.starterFilesJson);
         Map<String, String> ref = Json.files(ch.referenceSolutionJson);
@@ -292,7 +338,15 @@ public class ChallengeService {
         RunResult good = runner.run(lang.id, ref, tests, CodeRunner.Mode.TESTS);
         if (!good.compiled()) return "reference does not compile: " + good.diagnostics();
         if (good.total() < 3) return "needs at least 3 tests, got " + good.total() + " | stderr: " + good.stderr() + " | stdout: " + good.stdout();
-        if (!good.allPassed()) return "reference fails: " + good.tests().stream().filter(t -> !t.passed()).toList() + " " + good.stderr();
+        if (!good.allPassed()) {
+            // the program's own error first (a crash at start-up explains every failed test), then which tests failed
+            String err = good.stderr() == null ? "" : good.stderr().strip();
+            return (err.isEmpty() ? "" : "the program printed this error: " + cut(err, 700) + " | ")
+                    + "reference fails: " + good.tests().stream().filter(t -> !t.passed()).map(t -> t.name() + " (" + t.message() + ")").limit(6).toList();
+        }
+        // learners see every test by name, so a name has to say what is checked
+        var vague = good.tests().stream().map(RunResult.TestResult::name).filter(n -> n.trim().matches("(?i)(unit )?test[ _-]*#?\\d*|case[ _-]*\\d+|check[ _-]*\\d*")).toList();
+        if (!vague.isEmpty()) return "test names must say in plain words what is checked, not " + vague;
         ch.testNamesJson = Json.write(good.tests().stream().map(RunResult.TestResult::name).toList());
         RunResult start = runner.run(lang.id, starterWithMain(lang.id, starter), tests, CodeRunner.Mode.TESTS);
         if (start.allPassed()) return "starter already passes all tests";
@@ -305,7 +359,7 @@ public class ChallengeService {
             if (!brokenGuards.isEmpty()) return "starter breaks guard tests: " + brokenGuards;
             if (start.tests().stream().noneMatch(t -> t.name().startsWith("S1:") && !t.passed())) return "step 1 tests already pass on the starter";
         }
-        return null;
+        return Teaching.untaught(ch, catalog, lessonMd);
     }
 
     /** A runnable main file for each language, used when the starter doesn't include one. */
@@ -342,6 +396,17 @@ public class ChallengeService {
                         return 0;
                     }
                     """;
+            case CSHARP -> """
+                    using System;
+
+                    class Program
+                    {
+                        static void Main(string[] args)
+                        {
+                            // TODO: create objects here and print results to show your code working
+                        }
+                    }
+                    """;
         };
     }
 
@@ -353,13 +418,14 @@ public class ChallengeService {
         boolean ok = main != null && switch (lang) {
             case JAVA -> main.contains("static void main");
             case CPP -> main.contains("main(");
+            case CSHARP -> main.contains("static void Main") || main.contains("static int Main");
             default -> !main.isBlank();
         };
         if (!ok) m.put(lang.mainFile, mainBoilerplate(lang));
         return m;
     }
 
-    private static final Pattern TEST_NAME = Pattern.compile("(?:Check\\.run|check\\.run|check::run)\\(\\s*([\"'`])((?:(?!\\1)[^\\\\]|\\\\.)*)\\1");
+    private static final Pattern TEST_NAME = Pattern.compile("(?:Check\\.run|Check\\.Run|check\\.run|check::run)\\(\\s*([\"'`])((?:(?!\\1)[^\\\\]|\\\\.)*)\\1");
 
     /** Test names as the reference run reported them; older challenges fall back to reading the test source. */
     public static List<String> testNames(Challenge ch) {
@@ -457,7 +523,9 @@ public class ChallengeService {
                     - Each test is `check.run("descriptive name", fn)` with a double-quoted name, where fn is a lambda or a small `def` defined just above it.
                       At least 4 tests. The provided module check offers ONLY: check.eq(expected, actual), check.approx(expected, actual, eps=1e-9),
                       check.is_true(cond, message), check.raises(ExceptionType, fn). Do NOT define check.py. To capture print output use io.StringIO with contextlib.redirect_stdout.
-                    - The main file is main.py with a `main()` function and `if __name__ == "__main__": main()`.""";
+                    - The main file is main.py with a `main()` function and `if __name__ == "__main__": main()`.
+                    - Modules must never import each other in a circle (it crashes at import time): when classes refer to each other (for example states that
+                      return the next state), put them in ONE module, or import inside the function that needs the other class.""";
             case JAVASCRIPT -> """
                     - Node.js 18, CommonJS modules, no npm packages, no stdin, deterministic output (no randomness, no time). Use ES classes; # private fields are allowed.
                     - File names match [a-z0-9_]+.js, all in one folder. Each module ends with `module.exports = { ClassName };` and is loaded with `const { ClassName } = require("./file_name");`.
@@ -465,7 +533,9 @@ public class ChallengeService {
                     - Each test is `check.run("descriptive name", () => { ... });` and is synchronous (no async, no promises). At least 4 tests.
                       The provided module check offers ONLY: check.eq(expected, actual) (deep equality for arrays and plain objects),
                       check.approx(expected, actual, eps), check.isTrue(cond, message), check.throws(fn, ErrorType). Do NOT define check.js.
-                    - The main file is main.js; it requires the classes, creates objects and prints with console.log.""";
+                    - The main file is main.js; it requires the classes, creates objects and prints with console.log.
+                    - Modules must never require each other in a circle (the export is still empty): when classes refer to each other, put them in ONE module,
+                      or call require inside the function that needs the other class.""";
             case CPP -> """
                     - C++20, standard library only, no stdin, deterministic output (no randomness, no time).
                     - Put each class in its own header [a-z0-9_]+.hpp with `#pragma once` and the implementation inline in the header. Do not use .cpp files except main.cpp.
@@ -473,7 +543,19 @@ public class ChallengeService {
                     - Each test is `check::run("descriptive name", [] { ... });`. At least 4 tests. The provided header check.hpp offers ONLY:
                       check::eq(expected, actual) (needs operator==), check::approx(expected, actual, eps), check::is_true(cond, message),
                       check::throws<ExceptionType>([] { ... }). Do NOT define check.hpp. Compare std::string with std::string (wrap literals: std::string("x")).
-                    - The main file is main.cpp with `int main()`; it includes the headers, creates objects and prints with std::cout.""";
+                    - The main file is main.cpp with `int main()`; it includes the headers, creates objects and prints with std::cout.
+                    - Headers must never include each other in a circle: when classes refer to each other (for example states that return the next state),
+                      put them in ONE header, declaring the later classes first (`class B;`) and defining the member functions after all the classes.""";
+            case CSHARP -> """
+                    - C# 12 on .NET 8, standard library only, no NuGet packages, no stdin, deterministic output (no randomness, no time).
+                    - File names match [A-Za-z0-9_]+.cs. One top-level public class per file, named like the file, in the global namespace (no `namespace` line).
+                      Start every file with the `using` lines it needs (`using System;`, `using System.Collections.Generic;`, `using System.Linq;`): implicit usings are off.
+                    - Nullable reference types are off. Use PascalCase for classes, methods and properties, camelCase for locals; use properties (`public string Name { get; }`) where Java would use getters.
+                    - tests has a single file TestMain.cs with `using System;` and `public class TestMain { public static void Main(string[] args) { ... } }`.
+                    - Each test is `Check.Run("descriptive name", () => { ... });`. At least 4 tests. A provided static class Check offers ONLY:
+                      Check.Eq(object expected, object actual), Check.Eq(double expected, double actual, double eps),
+                      Check.IsTrue(bool cond, string message), Check.Throws<SomeException>(() => { ... }). Do NOT define Check. To capture Console output use Console.SetOut with a StringWriter.
+                    - The main file is Program.cs with `class Program` and `static void Main(string[] args)`; it creates objects and prints with Console.WriteLine.""";
         };
     }
 
@@ -496,6 +578,7 @@ public class ChallengeService {
             case PYTHON -> "Design checks in Python may use isinstance/issubclass, abc.ABC, inspect.signature, or a fake class defined in the test file.";
             case JAVASCRIPT -> "Design checks in JavaScript may use instanceof, typeof x.method === 'function', or a fake class defined in the test file.";
             case CPP -> "Design checks in C++ must happen at run time (no static_assert): use dynamic_cast, std::is_base_of_v (include <type_traits>) inside check::is_true, or a fake class defined in the test file that derives from the learner's interface.";
+            case CSHARP -> "Design checks in C# may use `is`, typeof(...).IsInterface, typeof(...).GetConstructor(...), or a fake class defined in the test file that implements the learner's interface.";
         };
         return """
                 This is a SOLID principles exercise about "%s": %s
@@ -507,7 +590,7 @@ public class ChallengeService {
                 """.formatted(c.title(), c.summary(), design, checks);
     }
 
-    private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid) {
+    private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid, String teaching) {
         String concept = c.title();
         String scaffoldRule = switch (scaffolding) {
             case "HEAVY" -> "HEAVY scaffolding: the starter is almost complete. Most classes are written; the learner fills 2-3 clearly marked TODO gaps.";
@@ -519,6 +602,8 @@ public class ChallengeService {
                 Difficulty: %3$d out of 5. %4$s
                 Avoid repeating these existing titles: %5$s
                 %9$s
+
+                %10$s
 
                 Return JSON with exactly these keys:
                 {
@@ -538,14 +623,16 @@ public class ChallengeService {
                 - Starter and referenceSolution must not include the check helper or %7$s.
                 - Include %6$s in starterFiles AND referenceSolution. In starterFiles it must be a working entry point
                   (with a TODO telling the learner what to demonstrate); in referenceSolution it creates a few objects and prints clear lines.
-                - descriptionMd must be detailed (at least 150 words) and use these Markdown sections:
-                  "## Goal" (the story and what the learner builds), "## Requirements" (a bullet per rule, with exact %1$s signatures),
-                  "## %6$s" (exactly what the demo should create and print), "## Example" (a fenced block with the exact output the reference %6$s prints),
-                  "## Tips" (1-2 gentle reminders, no solution code).
+                - descriptionMd must be detailed (at least 150 words) and use these Markdown sections, in this order:
+                  "## Before you start", "## Goal" (the story and what the learner builds), "## Provided for you" (what the starter already contains),
+                  "## Requirements" (numbered tasks, one per TODO, with exact %1$s signatures), "## New in this challenge" (only if rule 3 applies),
+                  "## %6$s" (exactly what the demo creates and prints, and whether the starter already does it or the learner writes it),
+                  "## Example" (a fenced block with the exact output the reference %6$s prints), "## Tips" (1-2 gentle reminders, no solution code).
+                - Make each test name a plain-words statement of what is checked (see the teaching rules).
                 - The Example output in descriptionMd must be exactly what referenceSolution's %6$s prints.
                 - Directly under the Example block add a short "Format:" bullet list that removes all guesswork about printing:
                   one item per printed line pattern, saying exactly what goes on each line, separators (e.g. ": " with one space),
                   number formatting (e.g. 2 decimal places), capitalisation, and that each item is on its own line.
-                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang));
+                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang), teaching);
     }
 }

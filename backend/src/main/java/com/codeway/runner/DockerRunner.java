@@ -16,7 +16,7 @@ import java.util.stream.Stream;
 
 /**
  * Production runner: checks and runs learner code inside a throwaway Docker container per run, for every practice
- * language (the sandbox image has the JDK, Python, Node and g++). The container has no network, a read-only root
+ * language (the sandbox image has the JDK, Python, Node and g++; C# runs in an image with the .NET SDK). The container has no network, a read-only root
  * filesystem, no Linux capabilities, a non-root user, and memory/CPU/process limits. Only the run's temp directory
  * is mounted. Enable with RUNNER_MODE=docker.
  */
@@ -28,6 +28,8 @@ public class DockerRunner implements CodeRunner {
     private static final int CONTAINER_TIMEOUT_S = 75; // whole container, enforced from outside
 
     @Value("${codeway.runner.image:codeway-sandbox:1}") private String image;
+    /** C# has its own image (the .NET SDK), so a problem with it can never take the other languages down. Built by deploy/ec2/sandbox/ensure.sh. */
+    @Value("${codeway.runner.csharp-image:codeway-sandbox-cs:1}") private String csharpImage;
     @Value("${codeway.runner.max-concurrent:2}") private int maxConcurrent;
     @Value("${codeway.runner.memory:512m}") private String memory;
     @Value("${codeway.runner.cpus:1.0}") private String cpus;
@@ -58,7 +60,7 @@ public class DockerRunner implements CodeRunner {
             openUp(dir); // the container runs as nobody (65534) and must be able to write into /work
 
             String name = "cw-" + UUID.randomUUID().toString().substring(0, 12);
-            List<String> cmd = dockerCommand(docker, runtime, name, memory, cpus, dir, image);
+            List<String> cmd = dockerCommand(docker, runtime, name, memory, cpus, dir, lang == Lang.CSHARP ? csharpImage : image);
             LocalRunner.Proc proc = LocalRunner.exec(cmd, dir, Map.of(), CONTAINER_TIMEOUT_S);
             if (proc.timedOut()) LocalRunner.exec(List.of(docker, "kill", name), dir, Map.of(), 10);
 

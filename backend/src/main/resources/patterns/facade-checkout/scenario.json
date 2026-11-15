@@ -1,0 +1,47 @@
+{
+  "id": "facade-checkout",
+  "concept": "facade",
+  "title": "Three checkouts, one copied recipe",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "Look at WebCheckout.submit, PhoneCheckout.takeOrder and Main: which lines are the same in all three, and who would have to be edited when the order of those calls changes?",
+    "Put the whole sequence behind one small class with a single method, so a caller only says what it wants (item, quantity, account, address) and gets a receipt id or an exception. That class, not its callers, knows the helpers, the order, and what to undo when a step fails.",
+    "public String placeOrder(String sku, int qty, String account, String address) {\n    inventory.reserve(sku, qty);\n    int total = inventory.unitPrice(sku) * qty;\n    try { payments.charge(account, total); }\n    catch (IllegalStateException e) { inventory.release(sku, qty); throw e; }\n    ..."
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Which principle does this code break most clearly?",
+      "explanation": "WebCheckout.submit, PhoneCheckout.takeOrder and the staff lines in Main each build the same four helpers (`new InMemoryInventory()`, `new InMemoryPayments()`, `new InMemoryShipping()`, `new InMemoryReceipts()`) and repeat the same calls: `reserve`, `charge`, `schedule`, `issue`. Every caller therefore knows every helper and also owns the rules of the sequence (the order, and giving the stock back when payment fails), so the same knowledge is copied in several places and a caller's real job, taking an order, is mixed with running it. That is Single Responsibility, and it is also Dependency Inversion because each caller depends on four concrete classes. The copies drift apart: PhoneCheckout forgot `inventory.release(...)` in the payment-failure path."
+    },
+    "steps": [
+      {
+        "title": "Give the order sequence one home",
+        "md": "Right now three callers each run the four calls themselves. Write one class that runs them.\n\n1. Open `OrderDesk.java`. Give the no-argument constructor `public OrderDesk()` its own `InMemoryInventory`, `InMemoryPayments`, `InMemoryShipping` and `InMemoryReceipts`, kept in fields.\n2. Implement `public String placeOrder(String sku, int qty, String account, String address)`: reserve the items, work out the total (`inventory.unitPrice(sku) * qty`), charge the account, schedule the delivery, then issue the receipt and **return its id**. If a helper throws, let the `IllegalStateException` pass through unchanged.\n3. Implement `public int stockLeft(String sku)`: it returns `inventory.available(sku)`.\n\nDo not touch `WebCheckout`, `PhoneCheckout` or `Main` yet. Tests for this step create a plain `new OrderDesk()`, place orders, and check the receipt ids (`R-1`, `R-2`, ...) and the stock."
+      },
+      {
+        "title": "Undo the reservation when payment fails",
+        "md": "A declined payment currently leaves the items reserved. Fix that once, inside `OrderDesk`.\n\n1. In `placeOrder`, if `charge` throws an `IllegalStateException`, call `inventory.release(sku, qty)` and then rethrow the **same** exception, so the caller still sees the message `Payment declined for EMPTY`.\n2. Do **not** release when `reserve` itself fails: nothing was reserved, so there is nothing to give back (releasing would add stock that never existed).\n3. A declined order must not consume a receipt number: the next successful order is still `R-1`.\n\nTests for this step use the account `EMPTY` (always declined) and check the stock afterwards."
+      },
+      {
+        "title": "Make the callers use the desk",
+        "md": "Now remove the copied sequence from the callers, keeping their public methods and messages exactly as they are.\n\n1. In `WebCheckout`, replace the four helper fields with one `private final OrderDesk desk = new OrderDesk();`. `submit(...)` calls `desk.placeOrder(...)` and returns `\"WEB OK \" + receiptId`, or `\"WEB FAILED \" + e.getMessage()` when it catches an `IllegalStateException`. `stockLeft` asks the desk.\n2. Do the same in `PhoneCheckout`: `takeOrder(...)` returns `\"PHONE: confirmed \" + receiptId` or `\"PHONE: sorry, \" + e.getMessage()`. As a side effect, declined phone payments now give the stock back.\n3. In `Main`, replace the hand-wired staff order with `new OrderDesk().placeOrder(\"LAMP\", 1, \"STAFF\", \"1 Office Rd\")` and keep printing `STAFF OK ` plus the receipt id. The output of `Main` must not change.\n\nTests for this step check that a declined phone order gives its stock back, and that neither `WebCheckout` nor `PhoneCheckout` still has a field of a helper type."
+      },
+      {
+        "title": "Prove it with stand-in helpers",
+        "md": "The point of all this is that checkout can now be exercised without the real helpers. The final tests define their own recording versions of `Inventory`, `PaymentGateway`, `ShippingService` and `Receipts` inside the test file, hand them to your desk, and check the exact order of the calls. They never edit any existing class.\n\n1. In `OrderDesk`, fill in `public OrderDesk(Inventory inventory, PaymentGateway payments, ShippingService shipping, Receipts receipts)`: keep the four **interface** types in the fields and use only them in `placeOrder` and `stockLeft`.\n2. Make `public OrderDesk()` call `this(new InMemoryInventory(), new InMemoryPayments(), new InMemoryShipping(), new InMemoryReceipts())`, so it behaves as before.\n3. Check that `OrderDesk` mentions an `InMemory...` class only in that no-argument constructor. If a step 4 test fails, look for a leftover `new InMemory...` elsewhere in the class, or a field declared with a concrete type.\n\nThe tests expect, for a successful order, the calls `reserve`, `charge`, `schedule`, `issue` in that order, and for a declined payment `reserve`, `charge`, `release`. Run the tests when you are done."
+      }
+    ],
+    "reveal": {
+      "pattern": "Facade",
+      "principle": "Single Responsibility",
+      "roles": [
+        { "name": "Facade (the simple entry point)", "is": "OrderDesk, with placeOrder" },
+        { "name": "Subsystem classes (the complex parts behind it)", "is": "Inventory, PaymentGateway, ShippingService and Receipts, with their in-memory implementations" },
+        { "name": "Clients (callers that only use the entry point)", "is": "WebCheckout, PhoneCheckout and Main" }
+      ],
+      "summary": "Facade puts one simple entry point in front of several cooperating classes, so the knowledge of the sequence and of what to undo lives in one place (Single Responsibility) and callers no longer depend on four concrete helpers. That is why fixing the missing release once also fixed the phone checkout, and why the desk could be tested with stand-ins. Do not use it when there is only one caller or when it would just forward a single call to a single class, because it then adds a layer for nothing. Also keep it small: if the desk starts collecting every feature of every subsystem it becomes a god class, and callers that need the details should still be able to reach the subsystems directly."
+    }
+  }
+}

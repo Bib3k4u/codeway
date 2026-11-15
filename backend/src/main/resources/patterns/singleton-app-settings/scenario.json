@@ -1,0 +1,46 @@
+{
+  "id": "singleton-app-settings",
+  "concept": "singleton",
+  "title": "Settings that every part loads for itself",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "How many AppSettings objects exist while the app runs, and who decided that number? What happens to a change made through one of them?",
+    "Make the class itself the only place that can create an AppSettings: hide the constructor, keep one instance in a static field, and hand it out through a static method that builds it the first time someone asks and returns the same one afterwards.",
+    "private static AppSettings instance;\npublic static AppSettings getInstance() {\n    if (instance == null) instance = new AppSettings();\n    return instance;\n}"
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Look at how ReportService and GreetingService get their AppSettings. Which principle does this code break most clearly?",
+      "explanation": "Each service runs `new AppSettings()` itself, so every caller decides how many copies of the settings exist and how (and how often) they are loaded. Who creates the settings and who shares them is scattered over the callers and nobody manages it: ReportService and GreetingService take on a job that is not theirs, which is Single Responsibility, and they also depend on how the concrete class gets built instead of being handed what they need, which is Dependency Inversion. Either answer is accepted. The visible damage is that a change made through one copy is never seen by the others, and the settings text is parsed again for every copy."
+    },
+    "steps": [
+      {
+        "title": "Hand out one shared AppSettings",
+        "md": "Today anybody can build a new `AppSettings`. Start by giving the class a way to hand out one shared instance, without breaking the code that still calls `new AppSettings()`.\n\nIn `AppSettings.java`:\n\n1. Add a private static field `instance` of type `AppSettings`.\n2. Implement `public static AppSettings getInstance()`: the **first** time it is called it creates the object (with `new AppSettings()`, which loads the settings once); every later call returns that same object. Do not create it before it is first asked for.\n3. Implement `public static void resetForTests()`: it forgets the shared instance (so the next `getInstance()` builds a fresh one) and sets the load counter back to 0. The tests call it before each check so that they do not leak into each other. (The starter already resets the counter; add the part about the instance.)\n\nLeave the constructor and the two services alone for now.\n\nTests for this step call `AppSettings.getInstance()` several times and check that it is always the same object, that a value set through one reference is visible through the other, that it is created lazily, and that `AppSettings.loadCount()` is 1 however many times you ask."
+      },
+      {
+        "title": "Make the services use it",
+        "md": "Now the callers must stop creating their own copies.\n\n1. In `ReportService`, replace `new AppSettings()` with `AppSettings.getInstance()`.\n2. Do the same in `GreetingService`.\n3. Keep both services' public methods exactly as they are: `ReportService.header()`, `money(double)`, `useTheme(String)` and `GreetingService.greet(String)`, `useLanguage(String)`.\n\nAfter this, a theme or language changed through one service is seen by the other, a service created later sees values changed earlier, and `AppSettings.loadCount()` stays at 1 no matter how many services you create.\n\nTests for this step create both services after calling `AppSettings.resetForTests()`, change a value through one and read it through the other."
+      },
+      {
+        "title": "Close the door on extra copies",
+        "md": "As long as the constructor is public, somebody can still write `new AppSettings()` and bring the old problem back. Now that nothing outside the class needs it, close that door.\n\n1. In `AppSettings`, make the constructor `private`. It must still load the settings (that part stays as it is). Make sure no other class calls `new AppSettings()` any more.\n2. `getInstance()` stays `public static`, and is now the only way to get an `AppSettings`.\n\nTests for this step use reflection to check that every constructor of `AppSettings` is private and that `getInstance()` is a public static method, and they check that the services still work and share one object."
+      },
+      {
+        "title": "Share it with something new",
+        "md": "The point of all this is that any part of the app, now or later, can reach the same settings without anyone passing them around or loading them again. The final tests prove it: the hidden test file defines its own class (a `ThemeBadge` that calls `AppSettings.getInstance()` whenever it renders, and a `CurrencySwitcher` that changes the currency) and checks that they see what `ReportService` and `GreetingService` changed, and the other way round. They never edit `AppSettings`, `ReportService` or `GreetingService`.\n\nYour task: make sure that passes.\n\n1. In `Main`, after the services have been used, print `AppSettings.getInstance().get(\"currency\")` to see the shared value from a place that never created the settings. (The tests do not check `Main`, and you can remove the line afterwards.)\n2. Check that the words `new AppSettings()` appear only inside `AppSettings` itself, and that `AppSettings.loadCount()` is still 1 after everything has run. If a step 4 test fails, look for a leftover private copy of the settings kept in a service field or a second place that builds one.\n\nRun the tests when you are done."
+      }
+    ],
+    "reveal": {
+      "pattern": "Singleton",
+      "principle": "Single Responsibility",
+      "roles": [
+        { "name": "Singleton (the one shared object)", "is": "AppSettings, with its private constructor, the static instance field and getInstance()" },
+        { "name": "Clients (users of the shared object)", "is": "ReportService, GreetingService, and the ThemeBadge and CurrencySwitcher defined in the tests" }
+      ],
+      "summary": "Singleton guarantees that a class has exactly one instance and gives everybody the same global way to reach it, so AppSettings is created and loaded once, on first use, and every part of the app sees the same values instead of private copies. Do not use it by reflex: it is hidden global state, any class can change it from anywhere, and it makes tests depend on each other (you saw why resetForTests was needed). When only a few classes need the object, prefer creating it once and passing it in, so the dependency is visible and easy to replace with a test double."
+    }
+  }
+}

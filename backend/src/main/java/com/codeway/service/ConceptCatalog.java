@@ -61,11 +61,50 @@ public class ConceptCatalog {
 
     /**
      * Patterns with guided practice: diagnose the principle a piece of code breaks, then refactor it step by step into the
-     * pattern. The rest of the track is lessons for now. Each has a hand-written anchor scenario under resources/patterns.
+     * pattern. Every pattern in the track has one. Each has a hand-written anchor scenario under resources/patterns.
      */
-    public static final Set<String> GUIDED = Set.of("strategy", "observer", "factory-method", "decorator");
+    public static final Set<String> GUIDED = Set.of("singleton", "factory-method", "builder", "adapter", "decorator", "facade", "strategy", "observer", "command", "state");
 
     public boolean isGuided(String conceptId) { return GUIDED.contains(conceptId); }
+
+    /**
+     * What a learner should already know before a concept's lesson and practice: concepts from earlier in the path.
+     * Basic syntax (variables, methods, printing) is assumed everywhere. The lesson and challenge prompts use these lists,
+     * and the app shows them as "Before you start" links.
+     */
+    private static final Map<String, List<String>> REQUIRES = Map.ofEntries(
+            Map.entry("encapsulation", List.of("classes-objects")),
+            Map.entry("inheritance", List.of("classes-objects", "encapsulation")),
+            Map.entry("polymorphism", List.of("classes-objects", "inheritance")),
+            Map.entry("abstraction", List.of("inheritance", "polymorphism")),
+            Map.entry("interfaces", List.of("polymorphism", "abstraction")),
+            Map.entry("single-responsibility", List.of("classes-objects", "encapsulation")),
+            Map.entry("open-closed", List.of("polymorphism", "abstraction", "single-responsibility")),
+            Map.entry("liskov-substitution", List.of("inheritance", "polymorphism")),
+            Map.entry("interface-segregation", List.of("interfaces", "single-responsibility")),
+            Map.entry("dependency-inversion", List.of("interfaces", "abstraction")),
+            Map.entry("singleton", List.of("classes-objects", "encapsulation")),
+            Map.entry("builder", List.of("classes-objects", "encapsulation")),
+            Map.entry("facade", List.of("classes-objects")),
+            Map.entry("factory-method", List.of("abstraction", "polymorphism")),
+            Map.entry("adapter", List.of("interfaces")),
+            Map.entry("decorator", List.of("interfaces", "open-closed")),
+            Map.entry("strategy", List.of("interfaces", "open-closed")),
+            Map.entry("observer", List.of("interfaces", "dependency-inversion")),
+            Map.entry("command", List.of("interfaces")),
+            Map.entry("state", List.of("polymorphism", "interfaces")));
+
+    /** The concepts to know first, in learning order. */
+    public List<Concept> requires(String conceptId) {
+        return REQUIRES.getOrDefault(conceptId, List.of()).stream()
+                .map(id -> CONCEPTS.stream().filter(c -> c.id().equals(id)).findFirst().orElse(null)).filter(Objects::nonNull).toList();
+    }
+
+    /** Position of a concept in the learning path (0-based), or -1. */
+    public int position(String conceptId) {
+        for (int i = 0; i < CONCEPTS.size(); i++) if (CONCEPTS.get(i).id().equals(conceptId)) return i;
+        return -1;
+    }
 
     public List<Track> tracks() { return TRACKS; }
 
@@ -83,7 +122,7 @@ public class ConceptCatalog {
         if (!LANGUAGES.contains(language)) return false;
         var c = find(language, conceptId);
         if (c.isEmpty()) return false;
-        // in the patterns track only the guided concepts have practice so far
+        // in the patterns track only concepts with a hand-written anchor scenario have practice
         if ("patterns".equals(c.get().track())) return GUIDED.contains(conceptId);
         return track(c.get().track()).map(Track::practice).orElse(false);
     }

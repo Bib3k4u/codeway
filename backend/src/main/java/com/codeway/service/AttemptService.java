@@ -115,8 +115,8 @@ public class AttemptService {
                 Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
                 Map.entry("language", ch.language),
                 Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
-                Map.entry("testNames", maskedNames(ch)),
-                Map.entry("examples", ChallengeService.examples(ch)),
+                Map.entry("testNames", ChallengeService.testNames(ch)),
+                Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),
                 Map.entry("sampleOutput", challengeService.sampleOutput(ch))));
         if (resumed) {
             if (a.draftFilesJson != null) out.put("draft", Json.files(a.draftFilesJson));
@@ -126,7 +126,6 @@ public class AttemptService {
         }
         out.put("mastery", masteryView(m));
         out.put("practice", a.isPractice());
-        out.put("revealed", revealed(a));
         out.put("hintQuota", hintQuota(a.userId).view());
         var guide = guideView(ch, a);
         if (guide != null) out.put("guide", guide);
@@ -228,7 +227,7 @@ public class AttemptService {
             out.put("allPassed", false);
             out.put("failedSubmissions", a.failedSubmissions);
             out.put("feedback", List.of(
-                    r.compiled() ? (total - passed) + " of " + total + " tests failed. Example tests show why; hidden tests can be revealed for a small mastery cost."
+                    r.compiled() ? (total - passed) + " of " + total + " tests failed. The failing ones are listed with what each expected."
                                  : "Your code didn't compile, so no tests could run. Fix the errors shown in the console.",
                     "Fix your code and submit again. Each extra submission lowers the mastery this challenge can earn, but finishing it still counts."));
             return out;
@@ -491,7 +490,7 @@ public class AttemptService {
         o.put("diagnostics", r.diagnostics());
         o.put("stdout", r.stdout());
         o.put("stderr", r.stderr());
-        o.put("tests", maskTests(r.tests(), ch, a));
+        o.put("tests", testViews(r.tests()));
         o.put("timedOut", r.timedOut());
         o.put("exitCode", r.exitCode());
         o.put("millis", r.millis());
@@ -512,7 +511,7 @@ public class AttemptService {
         if (full && s.hintLevel() == 0 && s.reveals() == 0 && s.failedSubmissions() == 0) f.add("No help used. Nice.");
         switch (o.fluencyLabel()) {
             case "fluent" -> { if (full) f.add("You worked fluently: most tests passed early, with few runs."); }
-            case "effortful" -> f.add("This one took real effort. Running the example tests early helps you see what's expected.");
+            case "effortful" -> f.add("This one took real effort. Running the tests early helps you see what's expected.");
             default -> {}
         }
         if (s.compileErrors() > 4) f.add(s.compileErrors() + " compile errors: read the first error carefully before running again.");
@@ -521,62 +520,26 @@ public class AttemptService {
         return f;
     }
 
-    // ---- hidden tests ----
-    /** Test names for the UI: the example tests by name, the rest as "Hidden test N". */
-    static List<String> maskedNames(Challenge ch) {
-        List<String> names = ChallengeService.testNames(ch);
-        int vis = ChallengeService.visibleCount(ch, names.size());
-        List<String> out = new ArrayList<>();
-        for (int i = 0; i < names.size(); i++) out.add(i < vis ? names.get(i) : "Hidden test " + (i - vis + 1));
-        return out;
-    }
-
-    /** Example tests show name and message; hidden ones only pass/fail, unless the learner revealed them. */
-    private static List<Map<String, Object>> maskTests(List<RunResult.TestResult> tests, Challenge ch, Attempt a) {
-        int vis = ChallengeService.visibleCount(ch, Math.max(tests.size(), ChallengeService.testNames(ch).size()));
-        Set<Integer> shown = revealed(a);
+    // ---- tests ----
+    /** Every test is listed by name (never by code): what is checked, and whether it passed with the message of a failure. */
+    private static List<Map<String, Object>> testViews(List<RunResult.TestResult> tests) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (int i = 0; i < tests.size(); i++) {
             var t = tests.get(i);
             Map<String, Object> m = new LinkedHashMap<>();
-            boolean hidden = i >= vis, open = !hidden || shown.contains(i);
-            m.put("name", open ? t.name() : "Hidden test " + (i - vis + 1));
+            m.put("name", t.name());
             m.put("passed", t.passed());
-            m.put("message", open ? t.message() : "");
-            m.put("hidden", hidden);
-            m.put("revealed", hidden && shown.contains(i));
+            m.put("message", t.message());
             m.put("index", i);
             out.add(m);
         }
         return out;
     }
 
+    /** Tests an older version of the app let learners reveal: only counted, for attempts made back then. */
     static Set<Integer> revealed(Attempt a) {
         Set<Integer> out = new TreeSet<>();
         for (Object o : Json.list(a.revealedJson)) if (o instanceof Number n) out.add(n.intValue());
-        return out;
-    }
-
-    /** Reveal one hidden test (what it checks and its last result). Costs a little mastery on this attempt. */
-    public Map<String, Object> reveal(Long userId, Long attemptId, int index) {
-        Attempt a = owned(userId, attemptId);
-        if (a.submittedAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt is already submitted");
-        Challenge ch = challenges.findById(a.challengeId).orElseThrow();
-        List<String> names = ChallengeService.testNames(ch);
-        int vis = ChallengeService.visibleCount(ch, names.size());
-        if (index < vis || index >= names.size()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Not a hidden test");
-        Set<Integer> shown = revealed(a);
-        shown.add(index);
-        a.revealedJson = Json.write(new ArrayList<>(shown));
-        a.lastActiveAt = Instant.now();
-        attempts.save(a);
-        logEvent(a.id, "reveal", "{\"index\":" + index + "}");
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("index", index);
-        out.put("name", names.get(index));
-        List<Object> last = Json.list(a.lastTestsJson);
-        if (index < last.size() && last.get(index) instanceof Map<?, ?> t) { out.put("passed", t.get("passed")); out.put("message", t.get("message")); }
-        out.put("reveals", shown.size());
         return out;
     }
 

@@ -1,0 +1,48 @@
+{
+  "id": "command-text-editor",
+  "concept": "command",
+  "title": "A toolbar with no way back",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 28,
+  "hints": [
+    "What does the toolbar remember after a button has been pressed, and what would an Undo button need to know in order to reverse the last press?",
+    "Turn each change to the document into a small object of its own that can both do the change and reverse it, and let something else keep those objects in the order they ran. The toolbar then only builds one and hands it over.",
+    "interface EditAction { void execute(); void undo(); }\nthen in a history class: Deque<EditAction> done = new ArrayDeque<>(); run(a) { a.execute(); done.push(a); } undo() { done.pop().undo(); }"
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Which principle does this code break most clearly?",
+      "explanation": "Each EditorToolbar button (onTypeHello, onTypeWorld, onDeleteWord) calls the concrete Document methods insert and deleteLast itself. A new button such as upper-case or replace therefore means another method written inside EditorToolbar, so the class is never closed to change, which is Open/Closed. The toolbar also depends directly on the concrete Document operations instead of on an abstraction of an editing action, which is Dependency Inversion. Because nothing is an object, nothing can be recorded, queued or undone either."
+    },
+    "steps": [
+      {
+        "title": "Give every change its own action object",
+        "md": "Right now a button changes the document and nothing remembers it. Make each kind of change an object that can do it and reverse it.\n\n1. Open `EditAction.java`. It already declares `void execute();` and `void undo();`. Keep it as it is.\n2. Fill in `InsertAction implements EditAction` with the constructor `InsertAction(Document document, String text)`. `execute()` inserts the text at the end of the document, `undo()` removes exactly that text again (use `document.deleteLast(text.length())`).\n3. Fill in `DeleteLastAction implements EditAction` with the constructor `DeleteLastAction(Document document, int count)`. `execute()` removes up to `count` characters from the end with `document.deleteLast(count)` and **remembers the text it returned**; `undo()` inserts that remembered text back. If the document held fewer than `count` characters, only those were removed and only those come back.\n\nDo not change `EditorToolbar` yet: its buttons keep working as before. Tests for this step create a `Document`, run an action's `execute()` and `undo()` directly, and check the text."
+      },
+      {
+        "title": "Add a history that runs and remembers actions",
+        "md": "Now give the actions a keeper. Fill in `ActionHistory.java`:\n\n1. `public void run(EditAction action)`: calls `action.execute()` and remembers the action.\n2. `public void undo()`: calls `undo()` on the **most recent** action that has not been undone yet, and forgets it. Calling `undo()` repeatedly goes back one action at a time, latest first, and an action is never undone twice.\n3. `public boolean canUndo()`: true when there is at least one action left to undo.\n4. When there is nothing to undo, `undo()` throws `IllegalStateException` with the message exactly `Nothing to undo`.\n\nHint: a `Deque<EditAction>` used as a stack (`push` / `pop`) does most of the work. `ActionHistory` must only know the `EditAction` type, never `InsertAction` or `DeleteLastAction`.\n\nTests for this step use small actions defined in the test file that only write into a log."
+      },
+      {
+        "title": "Send the toolbar buttons through the history",
+        "md": "Now make the buttons use the new pieces. In `EditorToolbar`:\n\n1. Add a field `ActionHistory history = new ActionHistory()`.\n2. `onTypeHello()` runs `new InsertAction(document, \"Hello\")` through the history, and `onTypeWorld()` runs `new InsertAction(document, \" world\")`. Neither calls `document.insert` itself any more.\n3. `onDeleteWord()` still works out how many characters the last word (with its space) takes, exactly as it does today, and then runs `new DeleteLastAction(document, count)` through the history. When that count is `0` (the text is empty) run nothing, so an empty delete is not remembered.\n4. Implement `public boolean onUndo()`: if the history has nothing to undo it returns `false`; otherwise it undoes the latest action and returns `true`.\n\nThe visible behaviour of the three buttons and `text()` must not change. Tests for this step press buttons and then `onUndo()`, and check the text after each press."
+      },
+      {
+        "title": "Plug in a brand-new action",
+        "md": "The point of all this is that a new kind of change needs no edit to existing classes. The final tests prove it: the hidden test file defines its own `UpperCaseAction implements EditAction` (it remembers the text from before and restores it on `undo`), runs it through your toolbar and through a plain `ActionHistory`, mixes it with the built-in actions, and undoes everything in reverse order. It never edits `EditorToolbar`, `ActionHistory`, `Document`, `InsertAction` or `DeleteLastAction`.\n\nYour task:\n\n1. Implement `public void run(EditAction action)` in `EditorToolbar`: it hands the action to the same history the buttons use, so `onUndo()` can take it back too. `document()` already gives callers the toolbar's document.\n2. Optionally, in `Main`, build your own small `EditAction` (for example one that replaces the whole text) and run it with `toolbar.run(...)` and `toolbar.onUndo()` to see it work without any other class changing. The tests do not check `Main`.\n3. Check that `ActionHistory` mentions no specific action class. If a step 4 test fails, look for a leftover direct dependency, or for a toolbar that keeps a second history of its own."
+      }
+    ],
+    "reveal": {
+      "pattern": "Command",
+      "principle": "Open/Closed",
+      "roles": [
+        { "name": "Command (the abstraction)", "is": "EditAction, with execute and undo" },
+        { "name": "ConcreteCommand", "is": "InsertAction, DeleteLastAction, and the UpperCaseAction defined in the tests" },
+        { "name": "Receiver (does the real work)", "is": "Document" },
+        { "name": "Invoker (runs and remembers commands)", "is": "ActionHistory, driven by the buttons of EditorToolbar (the client that creates the actions)" }
+      ],
+      "summary": "Command turns a request into an object, so it can be run, remembered, queued, logged or undone later. Here every change to the Document became an EditAction that ActionHistory can reverse, and a new button needs only a new action class, not an edit to the toolbar's existing code. Do not use it when nothing needs undo, queuing or logging: a plain method call is simpler to read, and one class per tiny action is overhead you would pay for nothing."
+    }
+  }
+}

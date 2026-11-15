@@ -27,13 +27,24 @@ final class GuidedPrompts {
             "state", List.of("ocp"),
             "observer", List.of("dip"),
             "factory-method", List.of("dip", "ocp"),
-            "decorator", List.of("ocp", "srp"));
+            "decorator", List.of("ocp", "srp"),
+            "singleton", List.of("srp", "dip"),
+            "builder", List.of("srp"),
+            "adapter", List.of("dip"),
+            "facade", List.of("srp", "dip"),
+            "command", List.of("ocp", "dip"));
 
     private static final Map<String, List<String>> TWISTS = Map.of(
             "strategy", List.of("an unknown type should fall back to a default rule", "a rule needs a second input besides the main one", "rules can be swapped while the program runs"),
             "observer", List.of("a listener can unsubscribe, even while a notification is being delivered", "listeners only care about some events", "the subject reports what changed, not just the new value"),
             "factory-method", List.of("an unknown kind should fail with a clear message", "new kinds can be registered without touching the factory", "the product needs one constructor argument"),
-            "decorator", List.of("the order the wrappers are stacked in changes the result", "a wrapper changes both a price and a description", "the same wrapper can be applied twice"));
+            "decorator", List.of("the order the wrappers are stacked in changes the result", "a wrapper changes both a price and a description", "the same wrapper can be applied twice"),
+            "singleton", List.of("the shared object can be cleared so a test starts fresh", "the shared object loads its data only on first use", "two different kinds of shared object"),
+            "builder", List.of("some fields are required and build() must reject a missing one", "a field has a sensible default", "the finished object cannot be changed afterwards"),
+            "adapter", List.of("a second incompatible vendor must plug in too", "the adapter converts units or formats on the way", "the adapter reports failures in the shape the app expects"),
+            "facade", List.of("one failing step must undo the steps before it", "the facade offers a second, simpler entry point", "the subsystems can be replaced by fakes"),
+            "command", List.of("undo and redo both work", "a command that cannot be undone is rejected clearly", "commands can be queued and run later"),
+            "state", List.of("an invalid move from a status must fail with a clear message", "a status has an action that only it allows", "the object can report which status it is in"));
 
     private static final List<String> DOMAINS = List.of(
             "insurance premiums", "discount rules for a shop", "tax by region", "document export formats", "log message formatting", "game damage types",

@@ -29,6 +29,8 @@ public class Challenge {
     @Column(columnDefinition = "text") public String guideJson;
     /** Hash of a seeded challenge's content, so an edited seed is re-validated and updated in place. */
     public String contentHash;
+    /** Version of the generation rules an AI challenge was made under (null: before versions). Older ones are no longer served. */
+    public Integer contentVersion;
     public boolean validated = false;
     public String origin;           // seed | ai
     public Instant createdAt = Instant.now();

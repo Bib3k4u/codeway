@@ -18,10 +18,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class PatternScenariosTest {
     @Test void everyScenarioValidates() throws Exception {
         List<Challenge> all = SeedPatterns.load(System.getProperty("scenario"));
-        var service = new ChallengeService(null, null, new LocalRunner(), null, new ConceptCatalog());
+        var service = new ChallengeService(null, null, new LocalRunner(), null, new ConceptCatalog(), null);
         for (Challenge c : all) {
             assertTrue(new ConceptCatalog().isGuided(c.concept), c.concept + " must be listed in ConceptCatalog.GUIDED");
-            assertFalse(c.descriptionMd.toLowerCase().contains(c.concept.replace('-', ' ')), c.title + ": the brief must not name the pattern");
+            assertFalse(java.util.regex.Pattern.compile("\\b" + c.concept.replace('-', ' ') + "s?\\b", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(c.descriptionMd).find(), c.title + ": the brief must not name the pattern");
             assertNull(service.validate(c), c.title + " (" + c.language + ")");
         }
         // (with no scenarios yet there is nothing to check)

@@ -1,0 +1,47 @@
+{
+  "id": "state-document-workflow",
+  "concept": "state",
+  "title": "A document workflow that fights every change",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 28,
+  "hints": [
+    "Four methods all start by asking what the document's status is. If you added an \"archived\" status tomorrow, which methods would you have to open, and what could you break while you are in there?",
+    "Give each status its own small object that knows what every operation means in that status and which status comes next. The document then keeps one such object and simply forwards each call to it.",
+    "Sketch: interface DocumentStatus { String name(); DocumentStatus submit(); ... } then class DraftStatus implements DocumentStatus { public DocumentStatus submit() { return new ReviewStatus(); } ... } and in Document: public void submit() { status = status.submit(); }"
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Look at the four operations in Document (submit, approve, reject and unpublish). Which principle does this code break most clearly?",
+      "explanation": "The same if/else chain on the status text is repeated in Document.submit, Document.approve, Document.reject and Document.unpublish, and each branch decides both what is allowed and which status comes next. An \"archived\" status therefore means editing all four methods, and every edit risks the draft, review and published behaviour that already works. That is the Open/Closed principle: a new status should arrive as new code, not as changes to code that is already in use."
+    },
+    "steps": [
+      {
+        "title": "Give each status its own class",
+        "md": "Right now the rules for all statuses are mixed together inside `Document`. Start by giving every status a home, without touching `Document` yet.\n\n1. `DocumentStatus` is already an interface with five methods: `String name()`, and `DocumentStatus submit()`, `approve()`, `reject()` and `unpublish()`. Each operation **returns the status the document moves to**. Leave the signatures as they are.\n2. Fill in the three classes, each `implements DocumentStatus`, with a public no-argument constructor:\n   - `DraftStatus`: `name()` is `\"draft\"`, and `submit()` returns a `ReviewStatus`.\n   - `ReviewStatus`: `name()` is `\"review\"`, `approve()` returns a `PublishedStatus` and `reject()` returns a `DraftStatus`.\n   - `PublishedStatus`: `name()` is `\"published\"`, and `unpublish()` returns a `DraftStatus`.\n\nThese are exactly the moves that `Document` allows today. For the other moves, throw an `IllegalStateException` for now (the exact message comes in the next step). `Document` keeps working as before."
+      },
+      {
+        "title": "Let each status refuse what it does not allow",
+        "md": "Each status class must now also say no, in the same words `Document` uses today.\n\nIn every status class, any move that is not allowed throws `IllegalStateException` whose message is exactly `Cannot <action> a <status> document`, where `<action>` is `submit`, `approve`, `reject` or `unpublish` and `<status>` is the status name. For example `new DraftStatus().approve()` throws `Cannot approve a draft document`.\n\nThat means:\n- `DraftStatus` refuses `approve`, `reject` and `unpublish`.\n- `ReviewStatus` refuses `submit` and `unpublish`.\n- `PublishedStatus` refuses `submit`, `approve` and `reject`.\n\nThe status classes do not change anything when they refuse: they just throw."
+      },
+      {
+        "title": "Make the document delegate",
+        "md": "Now `Document` should stop deciding anything itself.\n\n1. Replace the `String status` field with a field of type `DocumentStatus`.\n2. `new Document(String title)` starts with a `DraftStatus`.\n3. Fill in the second constructor `Document(String title, DocumentStatus initial)`: the document starts in exactly that status object.\n4. `status()` still returns text: it returns the `name()` of the current status object.\n5. Rewrite `submit()`, `approve()`, `reject()` and `unpublish()` so each one calls the same-named method on the current status object and stores the status it returns, for example `status = status.submit();`. Delete the `if`/`else` chains. If the status object throws, the exception simply reaches the caller and the document stays where it was.\n\nThe old calls (`new Document(\"Spec\")`, `submit()`, `status()` and so on) must give the same results and the same messages as before."
+      },
+      {
+        "title": "Add a status without editing anything",
+        "md": "The goal of the whole refactoring: a new status must not require editing any class that already exists.\n\nImplement `public void moveTo(DocumentStatus next)` in `Document`. It puts the document into exactly that status object, whatever kind it is, so that every later call goes to it. There is no check on which status it comes from.\n\nThe tests prove it by defining a brand-new `ArchivedStatus` inside the test file (reachable from a published document with `moveTo`, refusing `submit`, `approve` and `reject`, and turning back into a draft on `unpublish`) without touching `Document`, `DocumentStatus` or the three status classes."
+      }
+    ],
+    "reveal": {
+      "pattern": "State",
+      "principle": "Open/Closed",
+      "roles": [
+        { "name": "Context", "is": "Document" },
+        { "name": "State", "is": "DocumentStatus" },
+        { "name": "ConcreteState", "is": "DraftStatus, ReviewStatus and PublishedStatus (and any status added later, like the ArchivedStatus in the tests)" }
+      ],
+      "summary": "The State pattern lets an object change its behaviour when its status changes by handing every operation to a small object that represents the current status, and that object also decides which status comes next. Here it replaced four copies of the same if/else chain, so a new status is new code instead of an edit to Document. Do not use it when there are only two or three statuses that will never grow, or when a simple enum with a lookup table of allowed moves is enough: the extra classes would only add indirection."
+    }
+  }
+}

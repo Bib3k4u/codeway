@@ -217,4 +217,82 @@ final class Harness {
             }
             }  // namespace check
             """;
+
+    static final String CSHARP = """
+            using System;
+
+            public static class Check
+            {
+                private static readonly string Nonce = Environment.GetEnvironmentVariable("CHECK_NONCE") ?? "";
+
+                public static void Run(string name, Action body)
+                {
+                    try { body(); Emit(name, true, ""); }
+                    catch (Exception e) { Emit(name, false, e is CheckFailure ? e.Message : e.GetType().Name + ": " + e.Message); }
+                }
+
+                public static void Eq(object expected, object actual)
+                {
+                    if (!Equals(expected, actual))
+                        throw new CheckFailure("expected <" + Show(expected) + "> but got <" + Show(actual) + ">");
+                }
+
+                public static void Eq(double expected, double actual, double eps)
+                {
+                    if (Math.Abs(expected - actual) > eps)
+                        throw new CheckFailure("expected <" + expected + "> but got <" + actual + ">");
+                }
+
+                public static void IsTrue(bool cond, string message)
+                {
+                    if (!cond) throw new CheckFailure(message);
+                }
+
+                public static void Throws<T>(Action body) where T : Exception
+                {
+                    try { body(); }
+                    catch (T) { return; }
+                    catch (Exception e) { throw new CheckFailure("expected " + typeof(T).Name + " but got " + e.GetType().Name + ": " + e.Message); }
+                    throw new CheckFailure("expected " + typeof(T).Name + " but nothing was thrown");
+                }
+
+                private sealed class CheckFailure : Exception { public CheckFailure(string m) : base(m) { } }
+
+                private static string Show(object v) => v == null ? "null" : v is string s ? "\"" + s + "\"" : v.ToString();
+
+                private static void Emit(string name, bool ok, string msg)
+                {
+                    string clean = msg.Replace('\t', ' ').Replace('\n', ' ').Replace('\r', ' ');
+                    if (clean.Length > 300) clean = clean.Substring(0, 300);
+                    Console.Out.WriteLine("@@T" + Nonce + "\t" + name.Replace('\t', ' ') + "\t" + (ok ? "true" : "false") + "\t" + clean);
+                    Console.Out.Flush();
+                }
+            }
+            """;
+
+    /**
+     * Compiles C# with the Roslyn compiler that ships in the .NET SDK, without MSBuild or NuGet (which need far more memory and a
+     * network). Usage: sh csc.sh <MainClass> <files...>, run from src/. It finds the SDK and the matching reference assemblies next to the
+     * {@code dotnet} on PATH, writes ../out/prog.dll and a runtimeconfig for the runtime that matches those references.
+     */
+    static final String CSC_SCRIPT = """
+            #!/bin/sh
+            MAIN="$1"; shift
+            DOTNET="$(command -v dotnet)" || { echo "error: the .NET SDK is not installed on this machine"; exit 1; }
+            ROOT="$(dirname "$(readlink -f "$DOTNET" 2>/dev/null || echo "$DOTNET")")"
+            SDK="$(ls -d "$ROOT"/sdk/*/ 2>/dev/null | sort -V | tail -1)"
+            REF="$(ls -d "$ROOT"/packs/Microsoft.NETCore.App.Ref/*/ref/net*/ 2>/dev/null | sort -V | tail -1)"
+            if [ -z "$SDK" ] || [ -z "$REF" ]; then echo "error: could not find the .NET SDK or its reference assemblies under $ROOT"; exit 1; fi
+            VER="$(basename "$(dirname "$(dirname "$REF")")")"
+            TFM="$(basename "$REF")"
+            RUNTIME="$(ls "$ROOT"/shared/Microsoft.NETCore.App 2>/dev/null | sort -V | tail -1)"
+            set -- "$@"
+            REFS=""
+            for f in "$REF"*.dll; do REFS="$REFS -r:$f"; done
+            # shellcheck disable=SC2086
+            dotnet "$SDK"Roslyn/bincore/csc.dll -nologo -target:exe -main:"$MAIN" -out:../out/prog.dll -optimize- -debug- -warn:0 \
+                -nullable:disable -langversion:latest $REFS "$@" || exit 1
+            printf '{"runtimeOptions":{"tfm":"%s","framework":{"name":"Microsoft.NETCore.App","version":"%s"},"rollForward":"LatestMajor","configProperties":{"System.GC.Concurrent":false,"System.Runtime.TieredPGO":false,"System.Globalization.Invariant":true}}}' \
+                "$TFM" "${RUNTIME:-$VER}" > ../out/prog.runtimeconfig.json
+            """;
 }

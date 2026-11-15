@@ -26,8 +26,9 @@ public class SeedChallenges implements ApplicationRunner {
     private void seed() {
         for (Challenge c : all()) {
             try {
+                c.contentHash = hash(c);
                 var existing = repo.findByTitleAndOrigin(c.title, "seed");
-                if (existing.isPresent() && existing.get().validated) continue;
+                if (existing.isPresent() && existing.get().validated && c.contentHash.equals(existing.get().contentHash)) continue;
                 Challenge target = existing.orElse(c);
                 if (existing.isPresent()) { c.id = existing.get().id; target = c; }
                 String problem = service.validate(target);
@@ -38,6 +39,16 @@ public class SeedChallenges implements ApplicationRunner {
                 System.err.println("[seed] " + c.title + " failed: " + e.getMessage());
             }
         }
+    }
+
+    private static String hash(Challenge c) {
+        try {
+            var md = java.security.MessageDigest.getInstance("SHA-256");
+            for (String part : new String[]{c.title, c.descriptionMd, c.starterFilesJson, c.referenceSolutionJson, c.testsJson, c.hintsJson,
+                    String.valueOf(c.difficulty), c.scaffolding, String.valueOf(c.expectedMinutes)})
+                md.update((part + "\u0000").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(md.digest());
+        } catch (Exception e) { throw new IllegalStateException(e); }
     }
 
     private static Map<String, String> files(String... kv) {
@@ -60,14 +71,20 @@ public class SeedChallenges implements ApplicationRunner {
     static List<Challenge> all() { return List.of(shapeParade(), bankAccount(), payroll()); }
 
     // ------------------------------------------------------------------ Polymorphism
+    /**
+     * Uses only what the lessons before it teach: classes, inheritance, overriding. No abstract classes or interfaces (taught in
+     * the next lessons), and no reflection: each shape reports its own name through an overridden method.
+     */
     static Challenge shapeParade() {
         String shape = """
-                public abstract class Shape {
-                    public abstract double area();
+                public class Shape {
+                    // Every shape can say its name and its area. Subclasses replace (override) both.
+                    public String name() { return "Shape"; }
 
-                    public String describe() {
-                        return getClass().getSimpleName() + " with area " + String.format(java.util.Locale.ROOT, "%.2f", area());
-                    }
+                    public double area() { return 0; }
+
+                    // Calls name() and area() on whatever shape this really is.
+                    public String describe() { return name() + " with area " + area(); }
                 }
                 """;
         String circle = """
@@ -75,6 +92,9 @@ public class SeedChallenges implements ApplicationRunner {
                     private final double radius;
 
                     public Circle(double radius) { this.radius = radius; }
+
+                    @Override
+                    public String name() { return "Circle"; }
 
                     @Override
                     public double area() { return Math.PI * radius * radius; }
@@ -87,7 +107,7 @@ public class SeedChallenges implements ApplicationRunner {
                     public static void main(String[] args) {
                         List<Shape> shapes = List.of(new Circle(1), new Rectangle(2, 3), new Square(2));
                         for (Shape s : shapes) System.out.println(s.describe());
-                        System.out.printf("Total area: %.2f%n", ShapeUtils.totalArea(shapes));
+                        System.out.println("Total area: " + ShapeUtils.totalArea(shapes));
                     }
                 }
                 """;
@@ -103,26 +123,26 @@ public class SeedChallenges implements ApplicationRunner {
                                 this.height = height;
                             }
 
-                            @Override
-                            public double area() {
-                                // TODO 1: return the area of the rectangle
-                                return 0;
-                            }
+                            // TODO 1: override name() so it returns "Rectangle"
+
+                            // TODO 2: override area() so it returns width * height
                         }
                         """,
                 "Square.java", """
                         public class Square extends Rectangle {
                             public Square(double side) {
-                                // TODO 2: a square is a rectangle whose width and height are both `side`
+                                // TODO 3: a square is a rectangle whose width and height are both `side`
                                 super(0, 0);
                             }
+
+                            // TODO 4: override name() so it returns "Square"
                         }
                         """,
                 "ShapeUtils.java", """
                         import java.util.List;
 
                         public class ShapeUtils {
-                            // TODO 3: add up the area of every shape in the list.
+                            // TODO 5: add up the area of every shape in the list.
                             // Work with the general Shape type: do not check which kind each shape is.
                             public static double totalArea(List<Shape> shapes) {
                                 return 0;
@@ -141,12 +161,18 @@ public class SeedChallenges implements ApplicationRunner {
                     }
 
                     @Override
+                    public String name() { return "Rectangle"; }
+
+                    @Override
                     public double area() { return width * height; }
                 }
                 """);
         ref.put("Square.java", """
                 public class Square extends Rectangle {
                     public Square(double side) { super(side, side); }
+
+                    @Override
+                    public String name() { return "Square"; }
                 }
                 """);
         ref.put("ShapeUtils.java", """
@@ -165,17 +191,22 @@ public class SeedChallenges implements ApplicationRunner {
 
                 public class TestMain {
                     public static void main(String[] args) {
-                        Check.run("Rectangle computes width x height", () -> Check.eq(12.0, new Rectangle(3, 4).area(), 1e-9));
-                        Check.run("Square is a Rectangle with equal sides", () -> {
+                        Check.run("A Rectangle's area is width times height", () -> Check.eq(12.0, new Rectangle(3, 4).area(), 1e-9));
+                        Check.run("A Rectangle names itself Rectangle", () -> Check.eq("Rectangle", new Rectangle(3, 4).name()));
+                        Check.run("A Square is a kind of Rectangle with equal sides", () -> {
                             Object o = new Square(5);
                             Check.isTrue(o instanceof Rectangle, "Square should extend Rectangle");
                             Check.eq(25.0, ((Shape) o).area(), 1e-9);
                         });
-                        Check.run("describe() uses each shape's own area()", () -> {
-                            Check.eq("Circle with area 3.14", new Circle(1).describe());
-                            Check.eq("Rectangle with area 6.00", new Rectangle(2, 3).describe());
+                        Check.run("A Square names itself Square, even through the Shape type", () -> {
+                            Shape s = new Square(2);
+                            Check.eq("Square", s.name());
                         });
-                        Check.run("totalArea adds up different shapes", () -> {
+                        Check.run("describe() prints each shape's own name and area", () -> {
+                            Check.eq("Circle with area " + Math.PI, new Circle(1).describe());
+                            Check.eq("Rectangle with area 6.0", new Rectangle(2, 3).describe());
+                        });
+                        Check.run("totalArea adds up the areas of different shapes", () -> {
                             List<Shape> shapes = List.of(new Circle(1), new Rectangle(2, 3), new Square(2));
                             Check.eq(Math.PI + 6 + 4, ShapeUtils.totalArea(shapes), 1e-9);
                         });
@@ -184,23 +215,52 @@ public class SeedChallenges implements ApplicationRunner {
                 }
                 """);
         return make("polymorphism", "Shape Parade", 1, "HEAVY", 8, """
-                # Shape Parade
+                ## Before you start
 
-                A drawing app keeps a list of shapes. Each shape knows how to compute **its own** area, and the app should never need to ask *what kind* of shape it is. That is polymorphism.
+                You need **classes and objects** and **inheritance** (`extends`, `super(...)`, `@Override`). Nothing else is needed.
 
-                `Shape`, `Circle` and `Main` are already written. Fill in the three `TODO`s:
+                ## Goal
 
-                1. **`Rectangle.area()`** should return `width * height`.
-                2. **`Square`** is a `Rectangle` whose width and height are both `side`. Pass the right values to `super(...)`.
-                3. **`ShapeUtils.totalArea(List<Shape>)`** returns the sum of every shape's area, using only the `Shape` type.
+                A drawing app keeps a list of shapes. Each shape knows its own name and how to compute **its own** area, and the app never needs to ask *what kind* of shape it has. That is polymorphism: one call, `shape.area()`, and every object answers in its own way.
 
-                Notice how `Shape.describe()` calls `area()` and still prints the right number for every subclass.
+                ## Provided for you
 
-                Press **Run** to see your program's output, **Run tests** to check your work, **Submit** when you are done.
+                - `Shape`: an ordinary class with `name()` (returns `"Shape"`), `area()` (returns `0`) and `describe()`, which calls `name()` and `area()`.
+                - `Circle`: already extends `Shape` and overrides `name()` and `area()`. Read it: it is the pattern to copy.
+                - `Main`: already creates a list of shapes and prints them. You do not have to change it.
+                - `Rectangle`, `Square` and `ShapeUtils`: started for you, with `TODO`s where you write code.
+
+                ## Requirements
+
+                1. In `Rectangle` (TODO 1 and 2): override `name()` to return `"Rectangle"`, and `area()` to return `width * height`.
+                2. In `Square` (TODO 3 and 4): pass the right two values to `super(...)` so both sides equal `side`, and override `name()` to return `"Square"`.
+                3. In `ShapeUtils.totalArea(List<Shape> shapes)` (TODO 5): return the sum of every shape's `area()`. Call `area()` on each `Shape` and do not check which kind it is.
+
+                ## New in this challenge
+
+                - `List<Shape>` is a list that holds `Shape` objects. A `Circle`, a `Rectangle` and a `Square` can all go in it because each one **is a** `Shape`.
+                - `for (Shape s : shapes) { ... }` runs the body once for each item in the list, with `s` set to that item.
+
+                ## Main.java
+
+                `Main` is finished: it builds the list, prints one line per shape with `describe()`, and prints the total area.
+
+                ## Example
+
+                ```
+                Circle with area 3.141592653589793
+                Rectangle with area 6.0
+                Square with area 4.0
+                Total area: 13.141592653589793
+                ```
+
+                ## Tips
+
+                Press **Run** to see your program's output, **Run tests** to check your work, **Submit** when you are done. When you call `s.area()` on a `Shape`, Java runs the version in the shape's real class: that is the whole idea of this lesson.
                 """, starter, tests, ref, List.of(
-                "Look at `Shape.describe()`. It calls `area()` without knowing the subclass. What decides which version of `area()` runs?",
-                "Each subclass overrides `area()`. In `totalArea` you can just call `shape.area()` on a `Shape`: Java picks the right override at runtime. `Square` can reuse `Rectangle` by calling `super(side, side)`.",
-                "```java\npublic double area() { return width * height; }\n\npublic Square(double side) { super(side, side); }\n\ndouble total = 0;\nfor (Shape s : shapes) total += s.area();\nreturn total;\n```"));
+                "Look at `Shape.describe()`. It calls `name()` and `area()` without knowing the subclass. What decides which version runs?",
+                "Each subclass overrides `name()` and `area()`. In `totalArea` you can just call `s.area()` on a `Shape`: Java picks the right override while the program runs. `Square` can reuse `Rectangle` by calling `super(side, side)`.",
+                "```java\npublic String name() { return \"Rectangle\"; }\npublic double area() { return width * height; }\n\npublic Square(double side) { super(side, side); }\n\ndouble total = 0;\nfor (Shape s : shapes) total += s.area();\nreturn total;\n```"));
     }
 
     // ------------------------------------------------------------------ Encapsulation
@@ -282,11 +342,17 @@ public class SeedChallenges implements ApplicationRunner {
                 }
                 """);
         return make("encapsulation", "Safe Vault", 2, "PARTIAL", 10, """
-                # Safe Vault
+                ## Before you start
+
+                You need **classes and objects** (fields, constructors, methods).
+
+                ## Goal
 
                 Right now anyone can write `account.balance = 1_000_000;`. A bank cannot allow that.
 
-                Rework `BankAccount` so that **it** controls how its balance changes:
+                Rework `BankAccount` so that **it** controls how its balance changes. `BankAccount` and `Main` are already there: `Main` is finished, and `BankAccount` has `TODO`s where you write code.
+
+                ## Requirements
 
                 - Make the `balance` field **private**.
                 - `void deposit(double amount)`: throws `IllegalArgumentException` if `amount <= 0`.
@@ -294,6 +360,17 @@ public class SeedChallenges implements ApplicationRunner {
                 - `double getBalance()`: returns the current balance.
 
                 A new account starts with a balance of `0`.
+
+                ## New in this challenge
+
+                - `throw new IllegalArgumentException("message")` stops the method at once and reports a problem to whoever called it. Use it when a value that was passed in is not acceptable (here: an amount that is zero or negative).
+                - `IllegalStateException` works the same way, but is for when the object itself is not in a shape that allows the action (here: not enough money in the account).
+
+                ## Example
+
+                ```
+                Balance: 70.0
+                ```
                 """, starter, tests, ref, List.of(
                 "Who is allowed to change `balance` today? What single keyword would limit that to the class itself?",
                 "Make the field `private`, then expose behaviour instead of data: `deposit` and `withdraw` validate their input *before* touching `balance`, and `getBalance` is read-only.",
@@ -383,14 +460,28 @@ public class SeedChallenges implements ApplicationRunner {
                 }
                 """);
         return make("inheritance", "Payroll Hierarchy", 2, "PARTIAL", 10, """
-                # Payroll Hierarchy
+                ## Before you start
 
-                `Employee` already knows a name and a base salary. Build two specialised kinds of employee without copying code.
+                You need **classes and objects**, **encapsulation** (private fields) and the **inheritance** lesson (`extends`, `super(...)`, `@Override`).
+
+                ## Goal
+
+                `Employee` and `Main` are already written, and `Manager` and `Intern` are empty classes with a `TODO`. Build two specialised kinds of employee without copying code.
+
+                ## Requirements
 
                 - **`Manager`** extends `Employee`, takes an extra `bonus`, and earns the base salary **plus** the bonus. Constructor: `Manager(String name, double baseSalary, double bonus)`.
                 - **`Intern`** extends `Employee` and earns **half** of the base salary. Constructor: `Intern(String name, double baseSalary)`.
 
                 Reuse the parent with `super(...)` and `super.pay()` rather than duplicating its fields or logic. `toString()` is inherited and should report the right pay for each type.
+
+                ## Example
+
+                ```
+                Ana earns 1000.0
+                Ben earns 2500.0
+                Cleo earns 600.0
+                ```
                 """, starter, tests, ref, List.of(
                 "`Employee` keeps its fields private. How can a subclass hand the name and salary to the parent when it is created?",
                 "Use `extends Employee`, call `super(name, baseSalary)` in the constructor, then `@Override public double pay()` and build on `super.pay()`.",

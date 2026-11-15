@@ -1,0 +1,44 @@
+{
+  "id": "adapter-alert-gateways",
+  "concept": "adapter",
+  "title": "An alert service welded to one SMS vendor",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "AlertService has to know the vendor's method name, its parameter order and its status codes. What would you have to edit to try a second vendor, and how would a test avoid sending a real text?",
+    "Let AlertService talk to a small interface that you design for what the app needs (send to someone, get true or false). Then put the vendor's odd API behind one small class that translates each call and each result, and hand that class to the service instead of letting it create the vendor itself.",
+    "Sketch: interface MessageSender { boolean send(String to, String message); } then class LegacySmsSender implements MessageSender keeps a LegacySmsGateway and does: return gateway.sendText(to, message, 1) == 0; and AlertService keeps a MessageSender field and calls sender.send(to, \"ALERT: \" + message)."
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Look at AlertService.alert. Which principle does this code break most clearly?",
+      "explanation": "AlertService is the high-level class that should only care about 'alert someone and remember it', yet it creates `new LegacySmsGateway()` itself and calls `gateway.sendText(to, \"ALERT: \" + message, 1)`, so it knows the vendor's method name, its parameter order, the priority number and that status code 0 means success. It depends on a concrete low-level class and its awkward API instead of an abstraction that it owns. That is Dependency Inversion: the service should depend on an interface describing what the app needs, and the vendor detail should be pushed out behind it. It also makes the service impossible to test without the real vendor and hard to extend, but both come from that one direct dependency."
+    },
+    "steps": [
+      {
+        "title": "Wrap the vendor behind an interface the app wants",
+        "md": "The app wants to say \"send this message to that person and tell me whether it worked\". The vendor speaks a different language. Write the translation.\n\n1. `MessageSender.java` already declares `boolean send(String to, String message);`. Keep it as it is.\n2. Fill in `LegacySmsSender`: make it `implements MessageSender`. Its constructor `LegacySmsSender(LegacySmsGateway gateway)` keeps the gateway in a field.\n3. Implement `send(String to, String message)`: call the vendor with `gateway.sendText(to, message, 1)` (note the different name, the same recipient first, and a fixed priority of `1`) and return `true` only when the vendor's status code is `0`. Any other status code means `false`.\n4. Do **not** edit `LegacySmsGateway`: it is the vendor's class. Do not change `AlertService` yet.\n\nTests for this step wrap their own `LegacySmsGateway` in a `LegacySmsSender`, call `send`, and look at both the result and what the gateway recorded in `sentLog()`."
+      },
+      {
+        "title": "Make AlertService depend only on the interface",
+        "md": "Now stop `AlertService` from knowing the vendor at all.\n\n1. Replace the `LegacySmsGateway gateway` field with a `MessageSender sender` field.\n2. Fill in the constructor `AlertService(MessageSender sender)`: it keeps the sender it is given.\n3. Change `alert(String to, String message)` to call `sender.send(to, \"ALERT: \" + message)` and treat `true` as delivered and `false` as not delivered. The `ALERT: ` prefix stays in `AlertService`; the log line `to + \": \" + message` (without the prefix) and the `alertAll` behaviour stay exactly as they are.\n4. Keep `new AlertService()` working: make the no-argument constructor use `new LegacySmsSender(new LegacySmsGateway())` as its sender, so the old callers, `Main` and the `Guard:` tests do not change.\n5. After this, the only place in `AlertService` that mentions `LegacySmsGateway` is that default constructor.\n\nTests for this step give `AlertService` a fake sender written as a lambda, such as `(to, message) -> false`, and also give it a `LegacySmsSender` around a gateway of their own."
+      },
+      {
+        "title": "Plug in a second vendor",
+        "md": "The point of all this: a vendor with a different API needs no edit to any class that already exists. The final tests prove it. The hidden test file defines its own vendor class, `PushService`, with a different method name, a different parameter order and a text status (`push(title, text, deviceToken)` returning `\"DELIVERED\"` or `\"UNREACHABLE\"`), and its own small `PushSender implements MessageSender` that translates between the two. It then gives `new PushSender(...)` to `AlertService` and checks that alerts flow through it, that failures become plain `false`, and that a default `new AlertService()` still uses the SMS gateway. It never edits `AlertService`, `MessageSender`, `LegacySmsSender` or `LegacySmsGateway`.\n\nYour task: make sure that passes.\n\n1. In `Main`, try it yourself: define a tiny sender of your own, for example `MessageSender console = (to, message) -> { System.out.println(\"to \" + to + \": \" + message); return true; };`, pass it to `new AlertService(console)` and see an alert flow through without changing any other class. (The tests do not check `Main`, and you can remove it afterwards.)\n2. Check that `AlertService` mentions no vendor class except in the default constructor. If a step 3 test fails, look for a leftover direct call to `LegacySmsGateway`, a place where the `ALERT: ` prefix or the priority is added twice, or code that treats the default sender specially.\n\nRun the tests when you are done."
+      }
+    ],
+    "reveal": {
+      "pattern": "Adapter",
+      "principle": "Dependency Inversion",
+      "roles": [
+        { "name": "Client", "is": "AlertService, which now uses only the interface" },
+        { "name": "Target (the interface the app wants)", "is": "MessageSender" },
+        { "name": "Adaptee (the incompatible class you cannot change)", "is": "LegacySmsGateway (and the PushService defined in the tests)" },
+        { "name": "Adapter (the translator)", "is": "LegacySmsSender (and the PushSender defined in the tests)" }
+      ],
+      "summary": "Adapter wraps an existing class with an awkward or incompatible API behind the interface your own code wants, translating calls and results, so AlertService now depends on the MessageSender abstraction it owns instead of one vendor's class, and a new vendor is one new small class. It also let the tests replace the vendor with a simple fake. Do not use it when you control the other class and can simply change it to fit, or when only one vendor will ever exist and its API already fits what the app needs: the extra layer would only add indirection."
+    }
+  }
+}

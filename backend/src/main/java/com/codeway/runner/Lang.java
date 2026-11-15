@@ -13,7 +13,8 @@ public enum Lang {
     JAVA("java", "Java", "[A-Za-z0-9_]+\\.java", ".java", "Main.java", "TestMain.java", "Check.run("),
     PYTHON("python", "Python", "[A-Za-z0-9_]+\\.py", ".py", "main.py", "test_main.py", "check.run("),
     JAVASCRIPT("javascript", "JavaScript", "[A-Za-z0-9_]+\\.js", ".js", "main.js", "test_main.js", "check.run("),
-    CPP("cpp", "C++", "[A-Za-z0-9_]+\\.(cpp|hpp|h)", ".cpp, .hpp or .h", "main.cpp", "test_main.cpp", "check::run(");
+    CPP("cpp", "C++", "[A-Za-z0-9_]+\\.(cpp|hpp|h)", ".cpp, .hpp or .h", "main.cpp", "test_main.cpp", "check::run("),
+    CSHARP("csharp", "C#", "[A-Za-z0-9_]+\\.cs", ".cs", "Program.cs", "TestMain.cs", "Check.Run(");
 
     public final String id, label, extensions, mainFile, testFile, testCall;
     public final Pattern fileName;
@@ -30,11 +31,11 @@ public enum Lang {
 
     public String badNameMessage() { return "Invalid file name. Use letters, digits and underscores, ending in " + extensions; }
 
-    /** One command. {@code argv[0]} is a tool name (javac, java, python3, node, g++) or a path relative to src/. */
+    /** One command. {@code argv[0]} is a tool name (javac, java, python3, node, g++, dotnet, sh) or a path relative to src/. */
     public record Step(List<String> argv, Map<String, String> env) {}
 
     /**
-     * @param check      compile (Java, C++) or syntax check (Python, JavaScript); may produce diagnostics
+     * @param check      compile (Java, C++, C#) or syntax check (Python, JavaScript); may produce diagnostics
      * @param run        the program or the test entry point
      * @param entry      path (relative to the work dir) that must exist before {@code run} makes sense
      * @param noEntryMsg shown when {@code entry} is missing
@@ -79,6 +80,15 @@ public enum Lang {
                 yield new Plan(units.contains(entryFile) ? new Step(gpp, Map.of()) : null,
                         new Step(List.of("../out/prog"), env), "out/prog", missing);
             }
+            case CSHARP -> {
+                // Roslyn straight from the .NET SDK (see Harness.CSC_SCRIPT): no MSBuild, no NuGet, no network. Program.cs and the
+                // test entry each have a Main, so every file is compiled and -main picks which class starts.
+                List<String> csc = new ArrayList<>(List.of("sh", "../tools/csc.sh", tests ? "TestMain" : "Program"));
+                csc.addAll(sorted(sources, ".cs"));
+                Map<String, String> dotnetEnv = Map.of("DOTNET_NOLOGO", "1", "DOTNET_CLI_TELEMETRY_OPTOUT", "1", "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT", "1",
+                        "DOTNET_EnableDiagnostics", "0", "DOTNET_TieredPGO", "0", "CHECK_NONCE", nonce);
+                yield new Plan(new Step(csc, dotnetEnv), new Step(List.of("dotnet", "../out/prog.dll"), dotnetEnv), "out/prog.dll", missing);
+            }
         };
     }
 
@@ -89,6 +99,7 @@ public enum Lang {
             case PYTHON -> Map.of("src/check.py", Harness.PYTHON, "tools/syntax.py", Harness.PYTHON_SYNTAX);
             case JAVASCRIPT -> Map.of("src/check.js", Harness.JAVASCRIPT, "tools/syntax.js", Harness.JS_SYNTAX);
             case CPP -> Map.of("src/check.hpp", Harness.CPP);
+            case CSHARP -> Map.of("src/Check.cs", Harness.CSHARP, "tools/csc.sh", Harness.CSC_SCRIPT);
         };
     }
 

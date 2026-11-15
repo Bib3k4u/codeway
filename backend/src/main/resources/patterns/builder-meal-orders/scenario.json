@@ -1,0 +1,47 @@
+{
+  "id": "builder-meal-orders",
+  "concept": "builder",
+  "title": "Orders with eight loose arguments",
+  "difficulty": 2,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 25,
+  "hints": [
+    "Look at `new MealOrder(\"Burger\", \"Fries\", \"Cola\", \"L\", true, false, 12, \"no onions\")`. Without opening the class, can you tell what each value means, and what happens if you swap two of the same type?",
+    "Let a separate helper object collect the values: one clearly named method for each value, and one last method that checks everything and hands back the finished order. Then the order itself only has to hold finished values.",
+    "Sketch: public static class Builder { private String mainDish; public Builder mainDish(String m) { this.mainDish = m; return this; } ... public MealOrder build() { return new MealOrder(mainDish, side, drink, size, extraSauce, takeaway, tableNumber, note); } } and a call reads new MealOrder.Builder().mainDish(\"Burger\").tableNumber(12).build()."
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Look at the constructors of MealOrder. Which principle does this code break most clearly?",
+      "explanation": "MealOrder should be about one thing: describing a meal and working out its summary and total. Its five constructors and its setters add a second job, assembling an order from up to eight loose parameters, and every call site has to know their order and meaning (`true, false, 12` says nothing, and two strings can be swapped silently). Each new option adds another overload, and rules about what a valid order is have nowhere to live. That mixing of the order's own responsibility with how it is put together is the Single Responsibility principle."
+    },
+    "steps": [
+      {
+        "title": "Collect the values with named methods",
+        "md": "Right now a call site has to remember the order of eight values. Give the order a helper that collects them by name.\n\nThe starter already contains an empty nested class in `MealOrder.java`. Fill in `public static class Builder` (a nested static class named `Builder`, with the default public constructor, so `new MealOrder.Builder()` works):\n\n1. It keeps one private field for each value: `mainDish`, `side`, `drink`, `size` (all `String`), `extraSauce`, `takeaway` (both `boolean`), `tableNumber` (`int`) and `note` (`String`).\n2. It has one setter per value, named exactly like the value and returning the `Builder` itself so calls can be chained: `Builder mainDish(String)`, `Builder side(String)`, `Builder drink(String)`, `Builder size(String)`, `Builder extraSauce(boolean)`, `Builder takeaway(boolean)`, `Builder tableNumber(int)` and `Builder note(String)`.\n3. `public MealOrder build()` creates the order with the existing eight-argument constructor, passing the collected values.\n\nLeave the old constructors alone: they must keep working. For now `build()` does no checks and unset values stay `null`, `false` or `0`; the tests of this step set every value."
+      },
+      {
+        "title": "Refuse orders that make no sense",
+        "md": "Nothing stops a half-filled order today. In `MealOrder.Builder.build()`, before creating the order, check the collected values in exactly this order and throw an `IllegalStateException` with exactly this message:\n\n1. The main dish is `null` or blank (only spaces): `A meal needs a main dish`\n2. The table number is below 0: `Table number cannot be negative`\n3. A size was set (it is not `null`) and it is not exactly `\"S\"`, `\"M\"` or `\"L\"`: `Unknown size: ` followed by the size, for example `Unknown size: XL`\n\nA size that was never set is not an error here: the next step deals with it. The old public constructors do not need to check anything and must keep working as before."
+      },
+      {
+        "title": "Give the optional values defaults",
+        "md": "Most orders do not say everything. Give the `Builder` the same defaults that the short constructors already use, so a call can mention only what is different:\n\n- `side` is `\"none\"`\n- `drink` is `\"water\"`\n- `size` is `\"M\"`\n- `extraSauce` and `takeaway` are `false`, `tableNumber` is `0`\n- `note` is `\"\"` (empty)\n\nOnly the main dish stays required. A setter overrides the default of its own value and leaves the others alone, and the checks from step 2 still apply. So `new MealOrder.Builder().mainDish(\"Burger\").build()` must describe the same order as `new MealOrder(\"Burger\")`."
+      },
+      {
+        "title": "Make the finished order unchangeable",
+        "md": "Orders are now created through the `Builder`, so nobody needs to change one afterwards. In `MealOrder`:\n\n1. Make all eight fields `final`. The eight-argument constructor assigns them, and the shorter constructors keep chaining to it, so they still compile.\n2. Delete the three setters `setTableNumber`, `setExtraSauce` and `setNote`. Nothing in `Main` or in the tests uses them.\n\nThe final tests also define their own ready-made menus inside the test file (a children's menu and a takeaway lunch that fill in a `MealOrder.Builder` through its public methods), build orders from them, and check that an order is not affected by later calls on the same `Builder`. They need no change to any existing class: if one fails, check that `build()` copies the values into a new order and that no order keeps pointing at the `Builder`."
+      }
+    ],
+    "reveal": {
+      "pattern": "Builder",
+      "principle": "Single Responsibility",
+      "roles": [
+        { "name": "Product", "is": "MealOrder, now immutable and only about describing and pricing a meal" },
+        { "name": "Builder", "is": "MealOrder.Builder, with its fluent setters, defaults and the checks in build()" },
+        { "name": "Director (optional)", "is": "the ready-made menus defined in the tests, which fill a Builder in a new way" }
+      ],
+      "summary": "The Builder pattern moves the job of assembling an object out of its constructors into a separate object that collects named values, applies defaults, validates them and then creates the finished, immutable result. Here it replaced five constructors and three setters with readable calls, and orders can no longer be half-filled or changed. Do not use it when a class has only a few fields, a simple constructor is enough, or named arguments or a record already make the call readable: the extra class would only add code to read and keep in sync."
+    }
+  }
+}

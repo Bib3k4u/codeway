@@ -10,5 +10,7 @@ public class Lesson {
     public String concept;
     @Column(columnDefinition = "text") public String contentMd;
     public String source; // ai | fallback
+    /** Prompt version the AI lesson was written with (null: before versions existed). Older ones are written again, once. */
+    public Integer version;
     public Instant createdAt = Instant.now();
 }

@@ -15,6 +15,8 @@ final class RunSupport {
     static final int OUT_CAP = 64 * 1024;
     // javac "A.java:3: error: msg", g++ "a.cpp:3:5: error: msg", and our Python/JS syntax helpers (same shape)
     private static final Pattern DIAG = Pattern.compile("^([A-Za-z0-9_./-]+\\.[a-z]+):(\\d+)(?::\\d+)?: (error|warning|fatal error): (.*)$");
+    // csc "Foo.cs(3,5): error CS1002: ; expected" (the file name may carry a path)
+    private static final Pattern CS_DIAG = Pattern.compile("^(.+?\\.cs)\\((\\d+),\\d+\\): (error|warning) (CS\\d+): (.*?)(?: \\[.*\\])?$");
 
     /** A work dir ready to run: {@code dir/src} (code), {@code dir/out} (build output), {@code dir/tools} (helpers). */
     record Prepared(Lang.Plan plan, String nonce, int expectedTests, String badFile) {}
@@ -95,6 +97,14 @@ final class RunSupport {
         List<Diagnostic> out = new ArrayList<>();
         String[] lines = text.split("\n");
         for (int i = 0; i < lines.length; i++) {
+            if (lang == Lang.CSHARP) {
+                Matcher cs = CS_DIAG.matcher(lines[i].strip());
+                if (cs.matches()) {
+                    out.add(new Diagnostic(cs.group(1).replaceFirst("^(\\./|src/|.*/)", ""), Integer.parseInt(cs.group(2)), cs.group(3), cs.group(4) + ": " + cs.group(5)));
+                    if (out.size() >= 50) break;
+                }
+                continue;
+            }
             Matcher mt = DIAG.matcher(lines[i].strip());
             if (!mt.matches()) continue;
             String file = mt.group(1).replaceFirst("^(\\./|src/)", "");
