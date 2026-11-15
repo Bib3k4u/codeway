@@ -22,3 +22,6 @@ dist/
 *.tsbuildinfo
 .vscode/
 .idea/
+
+# local H2 database (SPRING_PROFILES_ACTIVE=h2): test data, never commit
+backend/.data/
