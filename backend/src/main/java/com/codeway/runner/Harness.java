@@ -258,13 +258,13 @@ final class Harness {
 
                 private sealed class CheckFailure : Exception { public CheckFailure(string m) : base(m) { } }
 
-                private static string Show(object v) => v == null ? "null" : v is string s ? "\"" + s + "\"" : v.ToString();
+                private static string Show(object v) => v == null ? "null" : v is string s ? "\\\"" + s + "\\\"" : v.ToString();
 
                 private static void Emit(string name, bool ok, string msg)
                 {
-                    string clean = msg.Replace('\t', ' ').Replace('\n', ' ').Replace('\r', ' ');
+                    string clean = msg.Replace('\\t', ' ').Replace('\\n', ' ').Replace('\\r', ' ');
                     if (clean.Length > 300) clean = clean.Substring(0, 300);
-                    Console.Out.WriteLine("@@T" + Nonce + "\t" + name.Replace('\t', ' ') + "\t" + (ok ? "true" : "false") + "\t" + clean);
+                    Console.Out.WriteLine("@@T" + Nonce + "\\t" + name.Replace('\\t', ' ') + "\\t" + (ok ? "true" : "false") + "\\t" + clean);
                     Console.Out.Flush();
                 }
             }

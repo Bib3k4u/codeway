@@ -50,6 +50,14 @@ class CSharpSupportTest {
         assertTrue(support.get("tools/csc.sh").contains("-main:\"$MAIN\""));
     }
 
+    @Test void harnessEscapesSurviveTheJavaTextBlock() {
+        String cs = Lang.CSHARP.support().get("src/Check.cs");
+        // a doubled backslash in the Java source is what keeps '\n' a C# escape instead of a real line break inside the character literal
+        assertTrue(cs.contains("'\\n'") && cs.contains("'\\t'") && cs.contains("\"\\t\""), cs);
+        assertFalse(cs.contains("'\n'") || cs.contains("'\t'"), "raw control characters inside a char literal");
+        assertTrue(cs.contains("\"\\\"\" + s + \"\\\"\""), "quotes around a shown string");
+    }
+
     @Test void compilerMessagesBecomeDiagnostics() {
         String log = "Shape.cs(12,5): error CS1002: ; expected\n"
                 + "/work/src/Circle.cs(3,18): error CS0246: The type or namespace name 'Shpe' could not be found (are you missing a using directive or an assembly reference?) [/work/x.csproj]\n"
