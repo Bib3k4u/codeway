@@ -127,8 +127,8 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   const [consoleOpen, setConsoleOpen] = usePref("consoleOpen", "1");
   const [focus, setFocus] = useState(false);
   const descWidth = Math.min(680, Math.max(280, Number(descW) || 380));
-  // In focus mode the brief starts hidden but can be shown; outside it, the saved preference applies.
-  const [focusBrief, setFocusBrief] = useState(false);
+  // In focus mode the brief starts open (each time focus mode is entered) and can be closed; outside it, the saved preference applies.
+  const [focusBrief, setFocusBrief] = useState(true);
   // the diagnose question lives in the left pane, so a guided challenge keeps it open until it is answered
   const briefRequired = !!start?.guide && !(quiz ?? start.guide.quiz).solved;
   const showDesc = briefRequired || (focus ? focusBrief : descHidden !== "1");
@@ -136,6 +136,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
 
   const toggleFocus = useCallback((on: boolean) => {
     setFocus(on);
+    if (on) setFocusBrief(true);
     if (on) document.documentElement.requestFullscreen?.().catch(() => {});
     else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   }, []);
