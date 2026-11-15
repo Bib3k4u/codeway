@@ -1,19 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, CircleDashed, Eye, EyeOff, Loader2, Lock, XCircle } from "lucide-react";
-import type { RunResp, TestExample, TestResult } from "@/lib/api";
-import { highlight } from "@/lib/highlight";
+import { Check, CircleDashed, Loader2, XCircle } from "lucide-react";
+import type { RunResp } from "@/lib/api";
 
-const STEP_MS = 260;
+/** Time between one test result appearing and the next. */
+export const STEP_MS = 260;
 
 /**
- * The Tests tab. Example tests are shown in full (their code, and why they failed); hidden tests only report
- * pass/fail until the learner reveals one (which costs a little mastery). After a run, results appear one at a
- * time with a running "Tests k/n" counter. Mount with a new `key` per run to replay the animation.
+ * The Tests tab. Every test is listed by its name (what is checked), never by its code. After a run the results appear one at
+ * a time with a running "Tests k/n" counter; a failed test shows the message of what it expected. Mount with a new `key` per
+ * run to replay the animation.
  */
-export default function TestPanel({ run, names, examples, language, running, submitting, onReveal }: {
-  run: RunResp | null; names: string[]; examples: TestExample[]; language: string;
-  running: boolean; submitting: boolean; onReveal: (index: number) => Promise<void>;
+export default function TestPanel({ run, names, running, submitting }: {
+  run: RunResp | null; names: string[]; running: boolean; submitting: boolean;
 }) {
   const tests = run?.compiled ? run.tests : [];
   const total = tests.length || names.length;
@@ -26,13 +25,11 @@ export default function TestPanel({ run, names, examples, language, running, sub
 
   const done = tests.length > 0 && shown >= tests.length;
   const passedSoFar = tests.slice(0, shown).filter((t) => t.passed).length;
-  const visibleCount = Math.max(examples.length, tests.filter((t) => !t.hidden).length, names.filter((n) => !n.startsWith("Hidden test")).length);
 
   if (run && !run.compiled && !running) return <p className="font-sans text-sm text-label3">Fix the compile errors in Console first, then run the tests again.</p>;
 
   return (
     <div className="font-sans">
-      {/* counter */}
       <div className="mb-3 flex items-center gap-3">
         <p className="flex items-center gap-2 text-[13px] font-semibold">
           {running ? <Loader2 size={14} className="animate-spin text-accent" /> : done && passedSoFar === tests.length ? <Check size={15} className="text-ok" /> : <TestTubeDot />}
@@ -46,71 +43,21 @@ export default function TestPanel({ run, names, examples, language, running, sub
         </div>
       </div>
 
-      {/* example tests: full code and result */}
-      <p className="mb-2 text-[11.5px] font-semibold uppercase tracking-wider text-label3">Example tests · what is checked</p>
-      <ul className="mb-4 space-y-2">
-        {Array.from({ length: visibleCount }).map((_, i) => {
-          const t = tests[i]; const ex = examples[i];
+      <p className="mb-2 text-[11.5px] font-semibold uppercase tracking-wider text-label3">What is checked</p>
+      <ul className="space-y-1.5">
+        {Array.from({ length: total }).map((_, i) => {
+          const t = tests[i];
           const state = running ? "running" : t && i < shown ? (t.passed ? "pass" : "fail") : t ? "pending" : "idle";
           return (
-            <li key={i} className={`rounded-xl border px-3 py-2.5 transition-colors ${state === "pass" ? "border-transparent bg-oksoft" : state === "fail" ? "border-transparent bg-badsoft" : "border-sep bg-card2"}`}>
-              <p className="flex items-start gap-2.5 text-[13.5px] font-medium">
-                <StateIcon state={state} />{t?.name ?? ex?.name ?? names[i]}
-              </p>
-              {ex?.code && <pre className="ml-[26px] mt-1.5 overflow-x-auto rounded-lg bg-card/70 px-3 py-2 font-mono text-[12px] leading-relaxed"><code>{highlight(ex.code, language)}</code></pre>}
+            <li key={i} className={`rounded-xl px-3 py-2 text-[13.5px] transition-colors ${state === "pass" ? "bg-oksoft" : state === "fail" ? "bg-badsoft" : "bg-fill"}`}>
+              <p className="flex items-start gap-2.5 font-medium"><StateIcon state={state} /><span className="min-w-0">{t?.name ?? names[i]}</span></p>
               {state === "fail" && t.message && <p className="ml-[26px] mt-1.5 font-mono text-[12px] text-bad">{t.message}</p>}
             </li>
           );
         })}
       </ul>
-
-      {/* hidden tests: pass/fail only, reveal on demand */}
-      {total > visibleCount && (
-        <>
-          <p className="mb-2 flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wider text-label3"><Lock size={11} />Hidden tests · edge cases checked on submit</p>
-          <ul className="space-y-1.5">
-            {Array.from({ length: total - visibleCount }).map((_, k) => {
-              const i = visibleCount + k; const t: TestResult | undefined = tests[i];
-              const state = running ? "running" : t && i < shown ? (t.passed ? "pass" : "fail") : t ? "pending" : "idle";
-              return <HiddenRow key={i} i={i} n={k + 1} t={t} state={state} onReveal={onReveal} />;
-            })}
-          </ul>
-          <p className="mt-2 text-[11.5px] leading-snug text-label3">Revealing a hidden test shows what it checks and why it failed. Each reveal costs a little mastery and resets your clean-pass streak.</p>
-        </>
-      )}
-      {!run && !running && <p className="mt-3 text-[12.5px] text-label3">Press Run tests to check your code against these. Submit runs every test, hidden ones included.</p>}
+      {!run && !running && <p className="mt-3 text-[12.5px] text-label3">Press Run tests to check your code against these. Submit runs the very same tests, and when every one passes the challenge is complete.</p>}
     </div>
-  );
-}
-
-function HiddenRow({ i, n, t, state, onReveal }: { i: number; n: number; t?: TestResult; state: string; onReveal: (i: number) => Promise<void> }) {
-  const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const revealed = !!t?.revealed;
-  return (
-    <li className={`rounded-xl px-3 py-2 text-[13.5px] ${state === "pass" ? "bg-oksoft" : state === "fail" ? "bg-badsoft" : "bg-fill"}`}>
-      <div className="flex items-center gap-2.5">
-        <StateIcon state={state} />
-        <span className={`min-w-0 flex-1 truncate ${revealed ? "font-medium" : "text-label2"}`}>{revealed ? t!.name : `Hidden test ${n}`}</span>
-        {!revealed && t && state !== "running" && (
-          confirm ? (
-            <span className="flex items-center gap-1.5 text-[12px]">
-              <span className="text-label3">Costs a little mastery.</span>
-              <button className="rounded-full bg-[var(--accent-fill)] px-2.5 py-0.5 font-semibold text-[var(--accent-ink)] disabled:opacity-60" disabled={busy}
-                onClick={async () => { setBusy(true); try { await onReveal(i); } finally { setBusy(false); setConfirm(false); } }}>
-                {busy ? <Loader2 size={12} className="animate-spin" /> : "Reveal"}
-              </button>
-              <button className="rounded-full px-1.5 py-0.5 text-label3 hover:text-label" onClick={() => setConfirm(false)} aria-label="Cancel"><EyeOff size={13} /></button>
-            </span>
-          ) : (
-            <button className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] text-label3 hover:bg-card hover:text-label" onClick={() => setConfirm(true)}>
-              <Eye size={12} />Reveal
-            </button>
-          )
-        )}
-      </div>
-      {revealed && state === "fail" && t?.message && <p className="ml-[26px] mt-1 font-mono text-[12px] text-bad">{t.message}</p>}
-    </li>
   );
 }
 

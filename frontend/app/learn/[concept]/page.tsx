@@ -179,6 +179,12 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
             </div>
             <h1 className="display text-[56px]">{row?.title ?? lesson?.title ?? " "}</h1>
             {row && <p className="mt-1.5 text-[17px] text-label2">{row.summary}</p>}
+            {lesson?.requires && lesson.requires.length > 0 && (
+              <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[13px] text-label2">
+                <span className="font-semibold uppercase tracking-wider text-label3">Read first</span>
+                {lesson.requires.map((r) => <Link key={r.id} href={`/learn/${r.id}?lang=${lang}`} className="chip hover:brightness-95">{r.title}</Link>)}
+              </p>
+            )}
             {trackTitle && <p className="mt-3 inline-flex rounded-full bg-fill px-3 py-1.5 text-[13px] text-label2">{trackTitle}{canPractice ? "" : " · practice coming soon"}</p>}
           </header>
           <article className="card rise px-6 py-8 sm:px-10 sm:py-10" style={{ animationDelay: "60ms" }}>

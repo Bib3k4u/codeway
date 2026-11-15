@@ -1,15 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
-import { ArrowRight, BookOpen, CheckCircle2, ChevronDown, LayoutGrid, Clock, Flame, Play, Target, Trophy, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, LayoutGrid, Clock, Flame, Target, Trophy, XCircle } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import ConceptIcon from "@/components/ConceptIcon";
+import BookPath from "@/components/BookPath";
 import Heatmap from "@/components/Heatmap";
-import type { ConceptRow, Track } from "@/lib/api";
 import { useConcepts } from "@/lib/concepts";
-import { usePref } from "@/lib/prefs";
 import { LANGS, langLabel, type LangId } from "@/lib/lang";
-import { byTrack, useTracks } from "@/lib/tracks";
+import { useTracks } from "@/lib/tracks";
 import { useAuth } from "@/lib/auth";
 import { useStats } from "@/lib/stats";
 
@@ -51,11 +49,6 @@ export default function Dashboard() {
   const { rows, refresh: refreshConcepts } = useConcepts();
   const tracks = useTracks();
   const language = (user?.preferredLanguage ?? "java") as LangId;
-  // Open tracks on the path (persisted). Nothing saved yet: the first track.
-  const [openPref, setOpenPref] = usePref("pathOpen", "oop");
-  const open = new Set(openPref.split(",").filter(Boolean));
-  const toggle = (id: string) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); setOpenPref([...n].join(",") || ","); };
-
   useEffect(() => { if (user) { refreshConcepts(); refresh(); } }, [user, refreshConcepts, refresh]);
 
   const practiceRows = rows?.filter((r) => r.practice);
@@ -149,80 +142,9 @@ export default function Dashboard() {
       </div>
 
       <Section title="Your learning path" meta="Learn in this order: each track builds on the one before">
-        {!rows || !tracks.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-[172px]" />)}</div> : (
-          <ol className="relative">
-            {byTrack(tracks, rows).map(({ track, rows: list }, ti, all) => (
-              <TrackStep key={track.id} track={track} rows={list} last={ti === all.length - 1} open={open.has(track.id)} onToggle={() => toggle(track.id)} />
-            ))}
-          </ol>
-        )}
+        {!rows || !tracks.length ? <div className="skeleton h-[420px]" /> : <BookPath tracks={tracks} rows={rows} language={language} />}
       </Section>
 
     </AppShell>
-  );
-}
-
-/** One track on the learning path: a numbered marker on a connecting line, then its concept cards. */
-function TrackStep({ track, rows, last, open, onToggle }: { track: Track; rows: ConceptRow[]; last: boolean; open: boolean; onToggle: () => void }) {
-  // some tracks (design patterns) have practice for only part of their concepts so far
-  const practiced = rows.filter((r) => r.practice);
-  const mastered = practiced.filter((r) => r.mastered).length;
-  const groups = [...new Set(rows.map((r) => r.group ?? ""))];
-  return (
-    <li className={`relative grid grid-cols-[40px_minmax(0,1fr)] gap-x-4 last:pb-0 sm:gap-x-5 ${open ? "pb-10" : "pb-5"}`}>
-      {!last && <span aria-hidden className="absolute bottom-0 left-[19px] top-11 w-px bg-sep" />}
-      <span aria-hidden className={`display z-[1] grid h-10 w-10 place-items-center rounded-full text-[19px] ${track.practice ? "" : "border border-sep bg-card text-label2"}`}
-        style={track.practice ? { background: "var(--accent-fill)", color: "var(--accent-ink)" } : undefined}>{track.order}</span>
-      <div className="min-w-0">
-        <button onClick={onToggle} aria-expanded={open} aria-controls={`path-${track.id}`}
-          className="group -mx-3 -mt-1.5 flex w-[calc(100%+24px)] flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-2xl px-3 py-2.5 text-left transition-colors hover:bg-fill">
-          <div className="min-w-0">
-            <h3 className="text-[19px] font-semibold tracking-tight">{track.title}</h3>
-            <p className="mt-0.5 text-[13.5px] text-label2">{track.summary} <span className="text-label3">· {rows.length} {rows.length === 1 ? "concept" : "concepts"}</span></p>
-          </div>
-          <span className="flex items-center gap-3">
-            {track.practice
-              ? <span className="chip chip-accent">{mastered} of {practiced.length} mastered{practiced.length < rows.length ? " · rest are lessons" : ""}</span>
-              : <span className="chip"><BookOpen size={12} />Lessons · practice coming soon</span>}
-            <ChevronDown size={18} className={`text-label3 transition-transform duration-200 group-hover:text-label ${open ? "rotate-180" : ""}`} />
-          </span>
-        </button>
-        {open && <div id={`path-${track.id}`} className="mt-4">{groups.map((g) => (
-          <div key={g || "all"} className="mb-4 last:mb-0">
-            {g && <p className="eyebrow mb-2">{g}</p>}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {rows.filter((r) => (r.group ?? "") === g).map((c, i) => <ConceptCard key={c.id} c={c} i={i} />)}
-            </div>
-          </div>
-        ))}</div>}
-      </div>
-    </li>
-  );
-}
-
-function ConceptCard({ c, i }: { c: ConceptRow; i: number }) {
-  return (
-    <Link href={`/learn/${c.id}`} className="block">
-      <div className="card rise flex h-full flex-col p-5 transition-[transform,border-color] duration-200 hover:-translate-y-0.5 hover:border-[var(--accent)]" style={{ animationDelay: `${i * 35}ms` }}>
-        <div className="mb-4 flex items-center justify-between">
-          <ConceptIcon symbol={c.symbol} size={36} />
-          {!c.practice ? <span className="chip">Lesson</span>
-            : c.mastered ? <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>
-            : c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
-            : c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Streak {c.streak}/3</span>
-            : null}
-        </div>
-        <h4 className="display text-[22px]">{c.title}</h4>
-        <p className="mt-1.5 flex-1 text-[13.5px] leading-snug text-label2">{c.summary}</p>
-        {c.practice && (
-          <div className="mt-4 flex items-center gap-3">
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fill" role="progressbar" aria-valuenow={Math.round(c.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`${c.title} mastery`}>
-              <div className="h-full rounded-full transition-[width] duration-1000" style={{ width: `${c.progress * 100}%`, background: c.mastered ? "var(--green)" : "var(--accent-fill)" }} />
-            </div>
-            <span className="text-xs tabular-nums text-label2">{c.attempts > 0 ? `${Math.round(c.progress * 100)}%` : "Not started"}</span>
-          </div>
-        )}
-      </div>
-    </Link>
   );
 }

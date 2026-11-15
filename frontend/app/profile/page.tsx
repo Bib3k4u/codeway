@@ -204,25 +204,37 @@ function TopicBreakdown({ sum, onPick }: { sum: HistorySummary | null; onPick: (
 
 // ---------------------------------------------------------------- history
 
+/** A dropdown pill with its own arrow (the native one sits flush against the edge) and no focus ring: the border just darkens. */
+function FilterSelect({ label, value, onChange, children }: { label: string; value: string; onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void; children: React.ReactNode }) {
+  return (
+    <span className="relative inline-flex">
+      <select aria-label={label} value={value} onChange={onChange}
+        className="no-ring h-9 cursor-pointer appearance-none rounded-full border border-sep bg-card pl-3.5 pr-9 text-[13px] text-label outline-none transition-colors hover:border-[var(--label-3)] focus:border-[var(--label-3)]">
+        {children}
+      </select>
+      <ChevronDown size={14} aria-hidden className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-label3" />
+    </span>
+  );
+}
+
 function FilterBar({ filters, onChange, topics }: { filters: Filters; onChange: (f: Filters) => void; topics: HistorySummary["byConcept"] }) {
-  const set = (k: keyof Filters) => (e: React.ChangeEvent<HTMLSelectElement>) => onChange({ ...filters, [k]: e.target.value });
+  const set = (k: keyof Filters) => (e: React.ChangeEvent<HTMLSelectElement>) => { onChange({ ...filters, [k]: e.target.value }); e.target.blur(); };
   const active = Object.values(filters).some(Boolean);
-  const sel = "h-9 rounded-full border border-sep bg-card px-3 text-[13px] text-label outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-fill)]";
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <ListTree size={15} className="text-label3" aria-hidden />
-      <select aria-label="Date range" className={sel} value={filters.days} onChange={set("days")}>
+      <FilterSelect label="Date range" value={filters.days} onChange={set("days")}>
         <option value="">Any time</option><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option>
-      </select>
-      <select aria-label="Result" className={sel} value={filters.result} onChange={set("result")}>
+      </FilterSelect>
+      <FilterSelect label="Result" value={filters.result} onChange={set("result")}>
         <option value="">All results</option><option value="passed">Passed</option><option value="failed">Not passed</option><option value="practice">Practice redos</option>
-      </select>
-      <select aria-label="Language" className={sel} value={filters.language} onChange={set("language")}>
+      </FilterSelect>
+      <FilterSelect label="Language" value={filters.language} onChange={set("language")}>
         <option value="">All languages</option>{LANGS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-      </select>
-      <select aria-label="Topic" className={sel} value={filters.concept} onChange={set("concept")}>
+      </FilterSelect>
+      <FilterSelect label="Topic" value={filters.concept} onChange={set("concept")}>
         <option value="">All topics</option>{topics.map((t) => <option key={t.concept} value={t.concept}>{t.conceptTitle}</option>)}
-      </select>
+      </FilterSelect>
       {active && <button className="btn btn-ghost btn-sm" onClick={() => onChange(NO_FILTERS)}><X size={14} />Clear</button>}
     </div>
   );

@@ -12,9 +12,12 @@ const KEYWORDS = new Set([
   // C++
   "namespace", "template", "typename", "using", "virtual", "override", "struct", "auto", "nullptr", "delete", "operator",
   "inline", "constexpr", "explicit", "friend", "noexcept", "unsigned", "const_cast", "static_cast", "dynamic_cast",
+  // C#
+  "sealed", "readonly", "foreach", "internal", "partial", "base", "out", "ref", "params", "event", "delegate", "where", "yield", "is", "switch", "lock",
 ]);
 const PRIMITIVES = new Set(["int", "double", "float", "long", "boolean", "char", "byte", "short", "String", "Object", "List", "Map", "Set", "str", "bool", "number", "string",
-  "dict", "list", "tuple", "size_t", "vector", "map", "unique_ptr", "shared_ptr", "std"]);
+  "dict", "list", "tuple", "size_t", "vector", "map", "unique_ptr", "shared_ptr", "std",
+  "decimal", "object", "Dictionary", "IEnumerable", "Console", "List"]);
 const TOKEN = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\b\d+(?:\.\d+)?\b|[A-Za-z_$][\w$]*|@[A-Za-z_]\w*|\s+|.)/g;
 
 /**

@@ -1,6 +1,6 @@
 import { api } from "./api";
 
-export type LangId = "java" | "python" | "javascript" | "cpp";
+export type LangId = "java" | "python" | "javascript" | "cpp" | "csharp";
 
 interface LangInfo {
   id: LangId;
@@ -32,6 +32,10 @@ export const LANGS: LangInfo[] = [
     id: "cpp", label: "C++", practice: true, file: /^[A-Za-z0-9_]+\.(cpp|hpp|h)$/, ext: ".hpp", placeholder: "name.hpp",
     template: (b) => (b.endsWith(".cpp") ? "" : "#pragma once\n\n"),
   },
+  {
+    id: "csharp", label: "C#", practice: true, file: /^[A-Za-z0-9_]+\.cs$/, ext: ".cs", placeholder: "Name.cs",
+    template: (b) => `using System;\n\npublic class ${b}\n{\n}\n`,
+  },
 ];
 
 export const isLang = (v: string | null | undefined): v is LangId => !!v && LANGS.some((l) => l.id === v);
@@ -43,6 +47,7 @@ export function monacoLanguage(path: string): string {
   if (path.endsWith(".py")) return "python";
   if (path.endsWith(".js")) return "javascript";
   if (/\.(cpp|hpp|h)$/.test(path)) return "cpp";
+  if (path.endsWith(".cs")) return "csharp";
   return "java";
 }
 

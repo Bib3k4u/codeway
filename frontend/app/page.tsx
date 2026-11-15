@@ -25,7 +25,7 @@ const RUN = [
 const TRACKS = [
   { n: "01", title: "Object-oriented programming", status: "Practice open", topics: "Classes and objects, encapsulation, inheritance, polymorphism, abstraction, interfaces" },
   { n: "02", title: "SOLID principles", status: "Practice open", topics: "Single responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion" },
-  { n: "03", title: "Design patterns", status: "Lessons open", topics: "Singleton, factory, builder, adapter, decorator, facade, strategy, observer, command, state" },
+  { n: "03", title: "Design patterns", status: "Practice open", topics: "Singleton, factory, builder, adapter, decorator, facade, strategy, observer, command, state" },
   { n: "04", title: "Low-level design", status: "Lessons open", topics: "Parking lot, elevator, library system, Splitwise, rate limiter: from requirements to classes to working code" },
 ];
 
@@ -105,7 +105,7 @@ function HomePage() {
                 </span>
               </h1>
               <p className="mt-7 max-w-[470px] text-[18px] leading-relaxed text-label2">
-                AI-written challenges at your level, in Java, Python, JavaScript or C++, that adapt after every submission, with hints that coach instead of solve.
+                AI-written challenges at your level, in Java, Python, JavaScript, C++ or C#, that adapt after every submission, with hints that coach instead of solve.
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-3">
                 <button className="btn btn-primary btn-lg" onClick={openAuth("register")}>Start free<ArrowRight size={18} /></button>
@@ -221,7 +221,7 @@ function HomePage() {
               </li>
             ))}
           </ol>
-          <p className="mt-6 text-[14.5px] text-label2">Every lesson is in Java, Python, JavaScript and C++. Practice is open for OOP and SOLID; design patterns and LLD challenges come next.</p>
+          <p className="mt-6 text-[14.5px] text-label2">Every lesson is in Java, Python, JavaScript, C++ and C#. Practice is open for OOP, SOLID and all ten design patterns; low-level design challenges come next.</p>
         </Block>
 
         {/* closing */}
@@ -248,7 +248,7 @@ function HomePage() {
             {TRACKS.map((t) => <li key={t.n} className="text-label2">{t.title}{t.status === "Practice open" && <span className="ml-2 text-[12px] font-semibold text-accent">Open</span>}</li>)}
           </FooterCol>
           <FooterCol title="Languages">
-            {["Java", "Python", "JavaScript", "C++"].map((l) => <li key={l} className="text-label2">{l}</li>)}
+            {["Java", "Python", "JavaScript", "C++", "C#"].map((l) => <li key={l} className="text-label2">{l}</li>)}
           </FooterCol>
         </div>
         <div className="border-t border-sep">
@@ -289,7 +289,7 @@ function TopicTicker() {
     <div className="border-t border-sep">
       <div className="mx-auto flex max-w-[1440px] items-center gap-6 px-5 py-5 sm:px-8 xl:px-12">
         <p className="shrink-0 text-[13px] font-semibold text-label2"><span className="text-accent">●</span> Live now <span className="mx-2 text-label3">/</span><span className="text-label3">Coming next</span></p>
-        <div className="marquee min-w-0 flex-1 overflow-hidden" aria-label="Topics: OOP and SOLID available now, then design patterns and low-level design">
+        <div className="marquee min-w-0 flex-1 overflow-hidden" aria-label="Topics: OOP, SOLID and design patterns available now, then low-level design">
           <div className="marquee-track">{row(false)}{row(true)}</div>
         </div>
       </div>

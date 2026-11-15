@@ -7,19 +7,26 @@ export interface Track { id: string; order: number; title: string; summary: stri
 export interface ConceptRow {
   id: string; title: string; summary: string; symbol: string; track: string; group?: string;
   available: boolean; inProgress: boolean; practice?: boolean; progress: number; score: number; streak: number; mastered: boolean; attempts: number;
+  /** lessons to know first */
+  requires?: Prereq[];
 }
-export interface Lesson { title: string; contentMd: string; source: string; track?: string; practice?: boolean }
+/** A lesson to know first. */
+export interface Prereq { id: string; title: string }
+export interface Lesson { title: string; contentMd: string; source: string; track?: string; practice?: boolean; requires?: Prereq[] }
 export interface MasteryView { score: number; streak: number; mastered: boolean; streakGoal: number; attempts: number }
 export interface Challenge {
   id: number; title: string; descriptionMd: string; difficulty: number; language?: string;
   scaffolding: "HEAVY" | "PARTIAL" | "BLANK"; expectedMinutes: number; files: Files;
-  testNames: string[]; sampleOutput: string; examples?: TestExample[];
+  /** every test, by name: what is checked (the code of a test is never shown) */
+  testNames: string[]; sampleOutput: string;
+  /** lessons to know before this challenge */
+  requires?: Prereq[];
 }
 export interface StartResp extends TimeRecord {
   attemptId: number; challenge: Challenge; mastery: MasteryView;
   resumed: boolean; draft?: Files; hints?: Hint[]; lastRun?: RunResp; startedAt?: string;
   /** redo of a past challenge: graded, mastery unchanged */
-  practice?: boolean; revealed?: number[]; hintQuota?: HintQuota;
+  practice?: boolean; hintQuota?: HintQuota;
   /** clock: the attempt's start (moves forward over breaks) and the server's time, to correct for a skewed device clock */
   serverNow?: string;
   /** design-pattern challenges: diagnose question first, then small refactoring steps */
@@ -39,8 +46,7 @@ export interface TimeRecord {
 }
 export interface HistoryRow { title: string; difficulty: number; passed: number; total: number; delta: number; hints: number; at: string }
 export interface Diagnostic { file: string; line: number; severity: string; message: string }
-export interface TestResult { name: string; passed: boolean; message: string; hidden?: boolean; revealed?: boolean; index?: number }
-export interface TestExample { name: string; code: string }
+export interface TestResult { name: string; passed: boolean; message: string; index?: number }
 export interface RunResp {
   compiled: boolean; diagnostics: Diagnostic[]; stdout: string; stderr: string;
   tests: TestResult[]; timedOut: boolean; exitCode: number; millis: number; runs: number;
@@ -56,7 +62,6 @@ export interface SubmitResp extends RunResp {
   bestSeconds?: number | null; longestSeconds?: number | null; attemptNumber?: number; submittedAttempts?: number;
   reveal?: PatternReveal;
 }
-export interface RevealResp { index: number; name: string; passed?: boolean; message?: string; reveals: number }
 export interface HistoryItem {
   attemptId: number; challengeId: number; title: string; concept: string; conceptTitle: string; language: string;
   difficulty: number; passed: number; total: number; delta: number; hints: number; practice: boolean; at: string;

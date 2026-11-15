@@ -101,6 +101,8 @@ body {
 }
 ::selection { background: var(--accent-soft); }
 :focus-visible { outline: 2px solid var(--accent-fill); outline-offset: 2px; border-radius: 6px; }
+/* controls that show focus with their own border colour (filter dropdowns, search box) skip the outer ring */
+.no-ring:focus, .no-ring:focus-visible { outline: none; box-shadow: none; }
 /* text fields show focus with their own border colour, no outer ring */
 .input:focus, .input:focus-visible { outline: none; box-shadow: none; }
 
@@ -319,3 +321,30 @@ body {
 
 /* thin scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--sep) transparent; }
+
+/* ---- learning path: a pile of books on a shelf ---- */
+/* six books (46px each, 3px apart) plus the shelf (18px): the height of every card */
+:root { --card-h: 309px; --book-cover: var(--accent-fill); --book-cover-ink: var(--accent-ink); --book-band-cover: rgba(0, 0, 0, 0.3); --book-edge: transparent; }
+.book {
+  position: relative; display: flex; align-items: center; height: 46px; max-width: calc(100% - 30px);
+  border-radius: 5px 8px 8px 5px; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); cursor: pointer; overflow: hidden;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.28), inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s ease;
+}
+@media (hover: hover) { .book:hover { transform: translateX(16px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.32), inset 0 -2px 0 rgba(0, 0, 0, 0.18); } }
+.book:focus-visible { transform: translateX(16px); outline: 2px solid var(--accent); outline-offset: 3px; }
+.book[aria-pressed="true"] { transform: translateX(80px); z-index: 2; box-shadow: 0 12px 26px rgba(0, 0, 0, 0.38), inset 0 -2px 0 rgba(0, 0, 0, 0.18); }
+@media (max-width: 1023px) { .book[aria-pressed="true"] { transform: translateX(24px); } }
+.book-text { position: absolute; inset: 0; display: flex; align-items: center; gap: 10px; padding: 0 28px; }
+.book-edge { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; border: 1px solid var(--book-edge); }
+.book-sheen { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 34%, rgba(0, 0, 0, 0) 62%, rgba(0, 0, 0, 0.24)); }
+.book-band { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255, 255, 255, 0.42); pointer-events: none; }
+.book-shelf {
+  height: 18px; border-radius: 3px 3px 10px 10px;
+  background: linear-gradient(180deg, #a8763f 0, #8a5a2c 35%, #6b4423 100%);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.25), 0 14px 20px -8px rgba(0, 0, 0, 0.5);
+}
+.book-card-in { animation: book-card-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes book-card-in { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+.book-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.92); color: #14301f; text-shadow: none; font-size: 10.5px; font-weight: 700; letter-spacing: 0.01em; }
+.book-cat { display: block; margin-top: 1px; font-size: 9.5px; font-weight: 600; letter-spacing: 0.13em; line-height: 1.1; text-transform: uppercase; opacity: 0.8; }

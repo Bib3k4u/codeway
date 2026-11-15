@@ -16,9 +16,9 @@ import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, ApiError, saveDraftOnExit, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RevealResp, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, ApiError, saveDraftOnExit, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
-import TestPanel from "@/components/practice/TestPanel";
+import TestPanel, { STEP_MS } from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
 import FloatingTip, { type Tip } from "@/components/FloatingTip";
 import GuidePanel from "@/components/practice/GuidePanel";
@@ -73,6 +73,8 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   const [restored, setRestored] = useState(false);
   const { refresh: refreshStats } = useStats();
   const [party, setParty] = useState(false);
+  // after a submit the results play out one by one in the Tests tab; the result sheet (and confetti) wait for that to finish
+  const [settling, setSettling] = useState(false);
   const [lastMode, setLastMode] = useState<"main" | "tests">("main");
   // design-pattern practice: the diagnose question comes first and the editor stays read-only until it is answered
   const [quiz, setQuiz] = useState<QuizState | null>(null);
@@ -241,6 +243,11 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       const r = await api<SubmitResp>(`/attempts/${attemptId}/submit`, { files, finish });
       setRun(r); refreshStats(); refreshConcepts();
       if (r.compiled) { setTestRun(r); setRunSeq((n) => n + 1); }
+      if (r.compiled && r.tests.length) {   // let every test show its result before the sheet covers the screen
+        setBusy(null); setSettling(true);
+        await new Promise((done) => setTimeout(done, r.tests.length * STEP_MS + 800));
+        setSettling(false);
+      }
       if (!r.final) {                       // not every test passed: show why, let them fix and resubmit
         setRetry(r); setSheet("retry");
         if (!r.compiled) setBottom("console");
@@ -248,7 +255,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       }
       setRetry(null); setResult(r); setSheet("result");
       if (r.allPassed) setParty(true);
-    } catch (e) { setSheet(null); setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
+    } catch (e) { setSheet(null); setSettling(false); setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
     finally { setBusy(null); }
   }
 
@@ -319,18 +326,10 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
     if (!info.file.test(n) || files[n] !== undefined || n in starter) return;
     const oldBase = oldName.replace(/\.[a-z]+$/, ""), newBase = n.replace(/\.[a-z]+$/, "");
     setFiles((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => k === oldName
-      ? [n, lang === "java" ? v.replace(new RegExp(`\\b(class|interface|enum|record)\\s+${oldBase}\\b`), `$1 ${newBase}`) : v]
+      ? [n, lang === "java" || lang === "csharp" ? v.replace(new RegExp(`\\b(class|interface|enum|record|struct)\\s+${oldBase}\\b`), `$1 ${newBase}`) : v]
       : [k, v])));
     setOpen((o) => o.map((x) => (x === oldName ? n : x)));
     setActive((a) => (a === oldName ? n : a));
-  }
-
-  /** Reveal one hidden test (costs a little mastery): fills in its name and failure message in the results. */
-  async function reveal(index: number) {
-    if (!attemptId) return;
-    const r = await api<RevealResp>(`/attempts/${attemptId}/reveal`, { index });
-    const patch = (x: RunResp | null) => x && { ...x, tests: x.tests.map((t, i) => (i === index ? { ...t, name: r.name, message: r.message ?? t.message, revealed: true } : t)) };
-    setTestRun(patch); setRun(patch); setRetry((x) => (x ? (patch(x) as SubmitResp) : x));
   }
 
   /** Restart the clock on this attempt (a fresh timed try at the same question). */
@@ -418,7 +417,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
   );
 
   return (
-    <AppShell fluid left={crumb} quiet={sheet !== null || party}>
+    <AppShell fluid left={crumb} quiet={sheet !== null || party || settling}>
       <div ref={wsRef} className={focus ? "fixed inset-0 z-[55] flex bg-card max-lg:flex-col" : "flex h-full min-h-0 bg-card max-lg:h-auto max-lg:flex-col max-lg:overflow-auto"}>
         {/* ---------- Left: brief & hints ---------- */}
         {showDesc && (<>
@@ -429,7 +428,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               {guide && <button role="tab" className="ptab" aria-selected={left === "steps"} onClick={() => setLeft("steps")}>Steps{!guide.quiz.solved && <span className="h-1.5 w-1.5 rounded-full bg-accentfill" aria-label="Question waiting" />}</button>}
               <button role="tab" className="ptab" aria-selected={left === "hints"} onClick={() => setLeft("hints")}>Hints{hintLevel > 0 && <span className="chip !h-[18px] !px-1.5 !text-[10px]">{hintLevel}</span>}</button>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => setHintAsk(true)} disabled={busy !== null || hintLevel >= 4 || hintsBlocked}
+            <button className="btn btn-secondary btn-sm" onClick={() => setHintAsk(true)} disabled={busy !== null || settling || hintLevel >= 4 || hintsBlocked}
               title={hintsBlocked ? `You've used your ${hintQuota?.limit ?? 5} hints for this hour` : hintLevel >= 3 ? "Shows the full solution and lowers mastery" : "Opt-in help. Costs a little mastery"}>
               {busy === "hint" ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
               {hintLevel >= 4 ? "No more hints" : hintsBlocked ? `Hints reset in ${hintMins} min` : hintLevel === 3 ? "Show solution" : "Need a hint?"}
@@ -444,6 +443,14 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
               <GuidePanel guide={guide} names={ch.testNames} tests={testRun?.tests} onAnswer={answerQuiz} />
             ) : left === "brief" ? (
               <>
+                {ch.requires && ch.requires.length > 0 && (
+                  <p className="mb-4 flex flex-wrap items-center gap-1.5 text-[12.5px] text-label2">
+                    <span className="font-semibold uppercase tracking-wider text-label3">Builds on</span>
+                    {ch.requires.map((r) => (
+                      <Link key={r.id} href={`/learn/${r.id}?lang=${lang}`} target="_blank" rel="noopener" className="chip hover:brightness-95" title="Opens the lesson in a new tab, so your work here is untouched">{r.title}</Link>
+                    ))}
+                  </p>
+                )}
                 <Markdown compact>{ch.descriptionMd}</Markdown>
                 {ch.sampleOutput && (
                   <section className="mt-6">
@@ -456,12 +463,11 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                     <ul className="space-y-1.5">
                       {ch.testNames.map((n, i) => {
                         const t = testRun?.tests[i];
-                        const hidden = n.startsWith("Hidden test") && !t?.revealed;
                         return (
-                          <li key={i} className={`flex items-start gap-2.5 text-[14px] ${hidden ? "text-label3" : ""}`}>
+                          <li key={i} className="flex items-start gap-2.5 text-[14px]">
                             {t ? (t.passed ? <Check size={16} className="mt-0.5 shrink-0 text-ok" /> : <XCircle size={16} className="mt-0.5 shrink-0 text-bad" />)
-                              : hidden ? <Lock size={14} className="mt-1 shrink-0" /> : <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-sep" />}
-                            <span>{t?.revealed ? t.name : n}</span>
+                              : <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-sep" />}
+                            <span>{t?.name ?? n}</span>
                           </li>
                         );
                       })}
@@ -525,14 +531,14 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                     attemptNumber={start.attemptNumber} bestSeconds={start.bestSeconds} longestSeconds={start.longestSeconds} onReset={resetClock} />
                 )}
                 <ResetMenu fileName={active} fileHasTemplate={fileHasTemplate} fileChanged={fileChanged} anyChanged={anyChanged}
-                  onResetFile={() => setConfirmReset("file")} onResetAll={() => setConfirmReset("all")} disabled={busy !== null} />
-                <button className="btn btn-secondary btn-sm" onClick={() => exec("main")} disabled={busy !== null} title="Run (⌘↵)">
+                  onResetFile={() => setConfirmReset("file")} onResetAll={() => setConfirmReset("all")} disabled={busy !== null || settling} />
+                <button className="btn btn-secondary btn-sm" onClick={() => exec("main")} disabled={busy !== null || settling} title="Run (⌘↵)">
                   {busy === "main" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}Run
                 </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => exec("tests")} disabled={busy !== null} title="Run tests (⌘⇧↵)">
+                <button className="btn btn-secondary btn-sm" onClick={() => exec("tests")} disabled={busy !== null || settling} title="Run tests (⌘⇧↵)">
                   {busy === "tests" ? <Loader2 size={14} className="animate-spin" /> : <TestTube2 size={14} />}Run tests
                 </button>
-                <button className="btn btn-primary btn-sm" onClick={() => submit()} disabled={busy !== null}>{busy === "submit" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}Submit</button>
+                <button className="btn btn-primary btn-sm" onClick={() => submit()} disabled={busy !== null || settling}>{busy === "submit" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}Submit</button>
                 <button className="btn btn-icon btn-sm btn-secondary" onClick={() => toggleFocus(!focus)} aria-label={focus ? "Exit focus mode" : "Focus mode"} aria-pressed={focus} title={focus ? "Exit focus mode (Esc)" : "Focus mode (⌘⇧F)"}>
                   {focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                 </button>
@@ -613,8 +619,8 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
             </div>
             {consoleOpen === "1" && <div className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed">
               {bottom === "tests" ? (
-                <TestPanel key={runSeq} run={testRun} names={ch.testNames} examples={ch.examples ?? []} language={lang}
-                  running={busy === "tests" || busy === "submit"} submitting={busy === "submit"} onReveal={reveal} />
+                <TestPanel key={runSeq} run={testRun} names={ch.testNames}
+                  running={busy === "tests" || busy === "submit"} submitting={busy === "submit"} />
               ) : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
                 : (
                   <div className="space-y-3">
@@ -638,7 +644,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
                           <button key={i} onClick={() => setBottom("tests")} title={t.passed ? "Passed" : "Failed: open the Tests tab"}
                             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ${t.passed ? "bg-oksoft text-ok" : "bg-badsoft text-bad"}`}>
                             {t.passed ? <span className="grid h-3.5 w-3.5 place-items-center rounded-[4px] bg-[var(--green)] text-white"><Check size={10} strokeWidth={3} /></span> : <XCircle size={13} />}
-                            <span className="max-w-[220px] truncate">{t.hidden && !t.revealed ? `Hidden ${i + 1 - testRun.tests.filter((x) => !x.hidden).length}` : t.name}</span>
+                            <span className="max-w-[220px] truncate">{t.name}</span>
                           </button>
                         ))}
                       </div>
@@ -704,7 +710,7 @@ function Workspace({ concept, lang, redo }: { concept: string; lang: LangId; red
       )}
 
       {/* ---------- Not every test passed: fix or move on ---------- */}
-      {sheet === "retry" && retry && <FixSheet r={retry} busy={busy === "submit"} onFix={() => setSheet(null)} onMoveOn={() => submit(true)} onReveal={reveal} />}
+      {sheet === "retry" && retry && <FixSheet r={retry} busy={busy === "submit"} onFix={() => setSheet(null)} onMoveOn={() => submit(true)} />}
 
       {/* ---------- Result sheet ---------- */}
       {party && sheet === "result" && <Confetti running onDone={endParty} />}
@@ -726,7 +732,7 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose: ()
   );
 }
 
-/** One failed hidden test: what it checked (its name) and why it failed (the assertion message). */
+/** One failed test: what it checked (its name) and why it failed (the assertion message). */
 function FailedTest({ name, message }: { name: string; message: string }) {
   return (
     <div className="rounded-xl border border-sep bg-card2 p-3.5">
@@ -736,22 +742,8 @@ function FailedTest({ name, message }: { name: string; message: string }) {
   );
 }
 
-/** A failed hidden test: only that it failed, with an opt-in reveal that costs a little mastery. */
-function HiddenFailure({ name, onReveal }: { name: string; onReveal: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-sep bg-card2 p-3.5">
-      <Lock size={15} className="shrink-0 text-label3" />
-      <p className="min-w-0 flex-1 text-[14px] font-semibold">{name} failed<span className="block text-[12px] font-normal text-label3">An edge case. Revealing it costs a little mastery.</span></p>
-      <button className="btn btn-secondary btn-sm" disabled={busy} onClick={async () => { setBusy(true); try { await onReveal(); } finally { setBusy(false); } }}>
-        {busy ? <Loader2 size={14} className="animate-spin" /> : "Reveal"}
-      </button>
-    </div>
-  );
-}
-
 /** Submission that didn't pass every test: explain each failure, then fix and resubmit, or move on. */
-function FixSheet({ r, busy, onFix, onMoveOn, onReveal }: { r: SubmitResp; busy: boolean; onFix: () => void; onMoveOn: () => void; onReveal: (i: number) => Promise<void> }) {
+function FixSheet({ r, busy, onFix, onMoveOn }: { r: SubmitResp; busy: boolean; onFix: () => void; onMoveOn: () => void }) {
   const failing = r.tests.filter((t) => !t.passed);
   const pct = r.total ? (r.passed / r.total) * 100 : 0;
   return (
@@ -778,9 +770,7 @@ function FixSheet({ r, busy, onFix, onMoveOn, onReveal }: { r: SubmitResp; busy:
         <div className="max-h-[42vh] space-y-2.5 overflow-auto border-t border-sep px-7 py-5">
           <p className="text-[13px] font-semibold text-label2">{r.compiled ? "What failed and why" : "Compile errors"}</p>
           {r.compiled
-            ? failing.map((t, i) => t.hidden && !t.revealed
-              ? <HiddenFailure key={i} name={t.name} onReveal={() => onReveal(t.index ?? -1)} />
-              : <FailedTest key={i} name={t.name} message={t.message} />)
+            ? failing.map((t, i) => <FailedTest key={i} name={t.name} message={t.message} />)
             : (r.diagnostics.length ? r.diagnostics.slice(0, 5) : [{ file: "", line: 0, severity: "error", message: r.stderr || "Compilation failed." }]).map((d, i) => (
               <p key={i} className="rounded-lg bg-badsoft px-3 py-2 font-mono text-[12.5px] leading-relaxed text-bad">{d.file && <b>{d.file}:{d.line} </b>}{d.message}</p>
             ))}
@@ -852,7 +842,7 @@ function ResultSheet({ r, concept, lang, onNext, onHome }: { r: SubmitResp; conc
         {r.reveal && <RevealCard reveal={r.reveal} />}
         {r.tests.some((t) => !t.passed) && (
           <div className="mb-6 max-h-[30vh] space-y-2 overflow-auto">
-            {r.tests.filter((t) => !t.passed).map((t, i) => <FailedTest key={i} name={t.name} message={t.hidden && !t.revealed ? "A hidden edge case failed." : t.message} />)}
+            {r.tests.filter((t) => !t.passed).map((t, i) => <FailedTest key={i} name={t.name} message={t.message} />)}
           </div>
         )}
         <div className="flex gap-3">

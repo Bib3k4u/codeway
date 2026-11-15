@@ -14,6 +14,29 @@ function niceMax(v: number) {
 }
 
 /**
+ * A smooth line through the points: a monotone cubic curve (Fritsch-Carlson), so it bends gently between days but never swings
+ * past a point, which means a day with nothing done can't make the line dip below zero or the axis.
+ */
+function smoothPath(xs: number[], ys: number[]): string {
+  const n = xs.length;
+  if (!n) return "";
+  const f = (v: number) => v.toFixed(1);
+  if (n === 1) return `M${f(xs[0])},${f(ys[0])}`;
+  const dx: number[] = [], m: number[] = [];
+  for (let i = 0; i < n - 1; i++) { dx.push(xs[i + 1] - xs[i]); m.push((ys[i + 1] - ys[i]) / dx[i]); }
+  const t: number[] = new Array(n);
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    t[i] = m[i - 1] * m[i] <= 0 ? 0 : (3 * (dx[i - 1] + dx[i])) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
+  }
+  let d = `M${f(xs[0])},${f(ys[0])}`;
+  for (let i = 0; i < n - 1; i++) {
+    d += `C${f(xs[i] + dx[i] / 3)},${f(ys[i] + (t[i] * dx[i]) / 3)} ${f(xs[i + 1] - dx[i] / 3)},${f(ys[i + 1] - (t[i + 1] * dx[i]) / 3)} ${f(xs[i + 1])},${f(ys[i + 1])}`;
+  }
+  return d;
+}
+
+/**
  * Single-series area chart over days (one hue: the accent, 2px line over a soft fill). Hover or arrow keys move a
  * crosshair with a tooltip; the title outside names the series, so there is no legend.
  */
@@ -34,7 +57,7 @@ export default function AreaChart({ points, format, unit }: { points: Point[]; f
     const iw = w - PAD.left - PAD.right, ih = H - PAD.top - PAD.bottom;
     const xs = points.map((_, i) => PAD.left + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw));
     const ys = points.map((p) => PAD.top + ih - (p.value / max) * ih);
-    const line = xs.map((x, i) => `${i ? "L" : "M"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join("");
+    const line = smoothPath(xs, ys);
     const area = n ? `${line}L${xs[n - 1].toFixed(1)},${PAD.top + ih}L${xs[0].toFixed(1)},${PAD.top + ih}Z` : "";
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ y: PAD.top + ih - f * ih, v: f * max }));
     // ~6 date labels, always including the last day
