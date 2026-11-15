@@ -63,12 +63,17 @@ public class StatsService {
             activeDays++; yearTotal += e.getValue();
         }
 
-        var rows = mastery.findByUserIdAndLanguage(userId, language);
-        int masteredCount = (int) rows.stream().filter(m -> m.mastered).count();
-        // concepts that can be practised (and so mastered) in this language; other tracks are lessons for now
-        int conceptCount = (int) catalog.list(language).stream().filter(c -> catalog.practiceOpen(language, c.id())).count();
-        // unstarted concepts count as 0 progress
-        double avgScore = conceptCount == 0 ? 0 : rows.stream().filter(m -> m.attemptsCount > 0).mapToDouble(m -> m.score).sum() / conceptCount;
+        // Mastery counts a concept once, in whichever language it was mastered; the language picker does not change these totals.
+        var rows = mastery.findByUserId(userId);
+        Set<String> practicable = new HashSet<>();
+        for (String lang : ConceptCatalog.LANGUAGES)
+            for (var c : catalog.list(lang)) if (catalog.practiceOpen(lang, c.id())) practicable.add(c.id());
+        int masteredCount = (int) rows.stream().filter(m -> m.mastered && practicable.contains(m.concept)).map(m -> m.concept).distinct().count();
+        int conceptCount = practicable.size();
+        // unstarted concepts count as 0 progress; a concept's progress is its best score in any language
+        Map<String, Double> best = new HashMap<>();
+        for (var m : rows) if (m.attemptsCount > 0 && practicable.contains(m.concept)) best.merge(m.concept, m.score, Math::max);
+        double avgScore = conceptCount == 0 ? 0 : best.values().stream().mapToDouble(Double::doubleValue).sum() / conceptCount;
 
         List<Map<String, Object>> recent = new ArrayList<>();
         List<Attempt> latest = mine.stream().filter(a -> a.submittedAt != null).sorted(Comparator.comparing((Attempt a) -> a.submittedAt).reversed()).limit(8).toList();

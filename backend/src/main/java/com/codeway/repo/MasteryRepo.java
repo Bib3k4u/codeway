@@ -7,4 +7,5 @@ import java.util.*;
 public interface MasteryRepo extends JpaRepository<ConceptMastery, Long> {
     Optional<ConceptMastery> findByUserIdAndLanguageAndConcept(Long userId, String language, String concept);
     List<ConceptMastery> findByUserIdAndLanguage(Long userId, String language);
+    List<ConceptMastery> findByUserId(Long userId);
 }

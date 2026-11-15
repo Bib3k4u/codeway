@@ -17,8 +17,8 @@ const RETURN_MS = 420;
 
 const hash = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
 const pctOf = (c: ConceptRow) => (c.practice && c.attempts > 0 ? Math.round(Math.max(0, Math.min(1, c.progress)) * 100) : 0);
-/** Share of the book that is coloured: all of it once mastered, otherwise how far you are (a sliver once started, so it shows). */
-const fillOf = (c: ConceptRow) => (!c.practice ? 0 : c.mastered ? 1 : c.attempts === 0 ? 0 : Math.max(0.07, Math.min(1, c.progress)));
+/** Share of the book that is coloured: all of it for a book not started yet (it wears its own colour, tagged "Not started") and once mastered, otherwise how far you are (a sliver once started, so it shows). */
+const fillOf = (c: ConceptRow) => (!c.practice || c.mastered || c.attempts === 0 ? 1 : Math.max(0.07, Math.min(1, c.progress)));
 
 /**
  * The learning path: one section per track, each a pile of books on a shelf with a card beside it. A book is coloured in as
@@ -189,8 +189,8 @@ function Legend() {
   const sw = (bg: string) => <span aria-hidden className="inline-block h-3 w-5 rounded-[3px]" style={{ background: bg, boxShadow: "inset 0 0 0 1px var(--book-edge)" }} />;
   return (
     <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-sep pt-3.5 text-[12px] text-label2">
-      <li className="flex items-center gap-2">{sw(COVER)}Not started</li>
-      <li className="flex items-center gap-2">{sw(`linear-gradient(90deg, ${COLORS[3]} 55%, ${COVER} 55%)`)}Coloured in with your progress</li>
+      <li className="flex items-center gap-2">{sw(COLORS[1])}Not started: its own colour, tagged &ldquo;Not started&rdquo;</li>
+      <li className="flex items-center gap-2">{sw(`linear-gradient(90deg, ${COLORS[3]} 55%, ${COVER} 55%)`)}Started: coloured in with your progress</li>
       <li className="flex items-center gap-2">{sw(COLORS[3])}<Check size={13} aria-hidden />Mastered: fully coloured</li>
     </ul>
   );
@@ -211,7 +211,7 @@ function Book({ c, n, color, open, onPick, onKeyDown }: { c: ConceptRow; n: numb
         {c.group && <span className="book-cat">{c.group}</span>}
       </span>
       <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] font-semibold tabular-nums opacity-95">
-        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : null}
+        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : c.attempts === 0 ? <span className="book-tag">Not started</span> : null}
       </span>
     </span>
   );
@@ -246,7 +246,7 @@ function BookCard({ c, order, total, color, language, out, history, requires, on
   const pct = pctOf(c);
   return (
     <div className={`card relative flex min-h-[300px] flex-col overflow-hidden transition-[opacity,transform] duration-300 lg:h-[var(--card-h)] ${out ? "translate-x-3 opacity-0" : "book-card-in"}`}>
-      <span aria-hidden className="h-1 shrink-0" style={{ background: c.practice && c.attempts > 0 ? color : "var(--accent-fill)" }} />
+      <span aria-hidden className="h-1 shrink-0" style={{ background: color }} />
       <button className="btn btn-icon btn-sm btn-ghost absolute right-2.5 top-3.5 z-[2]" onClick={onClose} aria-label="Close and put the book back"><X size={17} /></button>
 
       <div className="grid min-h-0 flex-1 content-start gap-x-6 gap-y-3 overflow-auto px-5 pb-3 pt-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
