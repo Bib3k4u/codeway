@@ -532,6 +532,12 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                           </li>
                         );
                       })}
+                      {(ch.hiddenTests ?? 0) > 0 && (
+                        <li className="flex items-start gap-2.5 text-[14px] text-label3">
+                          <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-dashed border-sep" />
+                          <span>{ch.hiddenTests === 1 ? "1 more check" : `${ch.hiddenTests} more checks`} on Submit</span>
+                        </li>
+                      )}
                     </ul>
                   </section>
                 )}
@@ -709,7 +715,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
             </div>
             {consoleOpen === "1" && <div className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12.5px] leading-relaxed">
               {bottom === "tests" ? (
-                <TestPanel key={runSeq} run={testRun} names={ch.testNames} animate={playedSeq.current !== runSeq} onPlayed={() => { playedSeq.current = runSeq; }}
+                <TestPanel key={runSeq} run={testRun} names={ch.testNames} hidden={ch.hiddenTests ?? 0} animate={playedSeq.current !== runSeq} onPlayed={() => { playedSeq.current = runSeq; }}
                   running={busy === "tests" || busy === "submit"} submitting={busy === "submit"} />
               ) : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
                 : (

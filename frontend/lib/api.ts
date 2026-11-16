@@ -19,8 +19,10 @@ export interface MasteryView { score: number; streak: number; mastered: boolean;
 export interface Challenge {
   id: number; title: string; descriptionMd: string; difficulty: number; language?: string;
   scaffolding: "HEAVY" | "PARTIAL" | "BLANK"; expectedMinutes: number; files: Files;
-  /** every test, by name: what is checked (the code of a test is never shown) */
+  /** the tests you can see and run, by name: what is checked (the code of a test is never shown) */
   testNames: string[]; sampleOutput: string;
+  /** more tests that run only on Submit (edge cases): how many, never which */
+  hiddenTests?: number;
   /** lessons to know before this challenge */
   requires?: Prereq[];
 }

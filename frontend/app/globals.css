@@ -347,6 +347,8 @@ body {
 .book-card-in { animation: book-card-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes book-card-in { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
 .book-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px 1px 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.92); color: #14301f; text-shadow: none; font-size: 10.5px; font-weight: 700; letter-spacing: 0.01em; }
+.book-tag-ok { background: #16a34a; color: #fff; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55); }
+.book-tag-new { background: rgba(15, 23, 42, 0.82); color: #fff; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4); }
 .book-cat { display: block; margin-top: 1px; font-size: 9.5px; font-weight: 600; letter-spacing: 0.13em; line-height: 1.1; text-transform: uppercase; opacity: 0.8; }
 
 /* project search: matches marked in the editor */

@@ -181,6 +181,9 @@ public class ChallengeService {
                 7. Everything the tests check is stated in descriptionMd: exact output text, formats, method names, parameters and what is thrown. Nothing is left to guess.
                 8. The learner sees the NAME of every test (never its code), so each name says in plain words what is checked, e.g. "A Dog greets with Woof!",
                    never "Test 1". A name must not reveal more than the description already says.
+                9. Order the tests from plain to tricky and write at least 6. The first half are the everyday cases the learner sees and can run while working;
+                   the rest are hidden until the learner submits: edge cases (empty or zero values, boundaries, repeated calls, invalid input) that follow from
+                   the description. Everything a hidden test checks must still be stated in descriptionMd.
                 """.formatted(lesson == null ? "" : " (given below)", note != null && note.avoid() != null ? " Do not use these, they come later: " + note.avoid() + "." : "",
                 later.isBlank() ? "" : " Not yet taught: " + later + ".", before.isBlank() ? "basic syntax only" : before));
         if (lesson != null) sb.append("\n--- LESSON THE LEARNER HAS JUST READ ---\n").append(lesson.length() > 7000 ? lesson.substring(0, 7000) : lesson).append("\n--- END OF LESSON ---\n");
@@ -436,6 +439,28 @@ public class ChallengeService {
             while (m.find()) names.add(m.group(2));
         }
         return names;
+    }
+
+    /**
+     * How many tests the learner sees (and gets from "Run tests"). The rest are held back and run only on Submit, so passing
+     * the visible ones isn't the whole job. Challenges with three tests or fewer, and guided ones (their steps are the tests), show all.
+     */
+    public static int visibleCount(Challenge ch) {
+        int n = testNames(ch).size();
+        if (n <= 3 || ChallengeService.guide(ch) != null) return n;
+        return Math.max(3, (n + 1) / 2);
+    }
+
+    public static List<String> visibleNames(Challenge ch) {
+        List<String> all = testNames(ch);
+        return all.subList(0, Math.min(visibleCount(ch), all.size()));
+    }
+
+    /** A run of the tests as the learner sees it from "Run tests": only the visible ones. */
+    public static RunResult onlyVisible(Challenge ch, RunResult r) {
+        int k = visibleCount(ch);
+        if (!r.compiled() || r.tests().size() <= k) return r;
+        return new RunResult(r.compiled(), r.diagnostics(), r.stdout(), r.stderr(), new ArrayList<>(r.tests().subList(0, k)), r.timedOut(), r.exitCode(), r.millis());
     }
 
     /**

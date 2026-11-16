@@ -115,7 +115,8 @@ public class AttemptService {
                 Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
                 Map.entry("language", ch.language),
                 Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
-                Map.entry("testNames", ChallengeService.testNames(ch)),
+                Map.entry("testNames", ChallengeService.visibleNames(ch)),
+                Map.entry("hiddenTests", ChallengeService.testNames(ch).size() - ChallengeService.visibleCount(ch)),
                 Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),
                 Map.entry("sampleOutput", challengeService.sampleOutput(ch))));
         if (resumed) {
@@ -179,7 +180,7 @@ public class AttemptService {
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
         boolean tests = "tests".equalsIgnoreCase(modeName);
         RunResult r = runner.run(ch.language, files, tests ? Json.files(ch.testsJson) : Map.of(), tests ? CodeRunner.Mode.TESTS : CodeRunner.Mode.MAIN);
-        if (tests) { r = ChallengeService.withAllTests(ch, r); a.lastTestsJson = Json.write(r.tests()); }
+        if (tests) { r = ChallengeService.onlyVisible(ch, ChallengeService.withAllTests(ch, r)); a.lastTestsJson = Json.write(r.tests()); }
         a.runs++;
         if (!r.compiled()) a.compileErrors++;
         else if (r.runtimeError() || r.timedOut()) a.runtimeErrors++;
@@ -262,7 +263,8 @@ public class AttemptService {
         long seconds = Math.max(0, Duration.between(a.startedAt, a.submittedAt).toSeconds());
         a.elapsedSeconds = (int) Math.min(Integer.MAX_VALUE, seconds);
         double minutes = seconds / 60.0;
-        Double firstRatio = a.firstRunPassed == null || total == 0 ? null : Math.min(1.0, (double) a.firstRunPassed / total);
+        int seen = Math.max(1, Math.min(total, ChallengeService.visibleCount(ch)));   // the first run only ever showed the visible tests
+        Double firstRatio = a.firstRunPassed == null || total == 0 ? null : Math.min(1.0, (double) a.firstRunPassed / seen);
         var signals = new MasteryService.Signals(passed, total, a.runs, a.compileErrors, a.hintsUsed, minutes, ch.expectedMinutes,
                 firstRatio, failedBefore, revealed(a).size());
         var o = mastery.apply(userId, ch.language, ch.concept, ch.difficulty, signals, a.isPractice());
@@ -703,7 +705,8 @@ public class AttemptService {
                 Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
                 Map.entry("language", ch.language), Map.entry("concept", ch.concept),
                 Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
-                Map.entry("testNames", ChallengeService.testNames(ch)),
+                Map.entry("testNames", ChallengeService.visibleNames(ch)),
+                Map.entry("hiddenTests", ChallengeService.testNames(ch).size() - ChallengeService.visibleCount(ch)),
                 Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),
                 Map.entry("sampleOutput", challengeService.sampleOutput(ch))));
         out.put("hints", Json.list(a.hintsJson));

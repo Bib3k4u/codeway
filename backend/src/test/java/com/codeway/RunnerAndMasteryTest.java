@@ -168,4 +168,26 @@ class RunnerAndMasteryTest {
         var typo = runner.run(Map.of("Book.java", "public class Book { private Sting title; }"), Map.of(), CodeRunner.Mode.MAIN);
         assertTrue(typo.diagnostics().get(0).message().contains("symbol: class Sting"), typo.diagnostics().toString());
     }
+
+    private static com.codeway.domain.Challenge challengeWithTests(int n) {
+        var ch = new com.codeway.domain.Challenge();
+        ch.testNamesJson = "[" + java.util.stream.IntStream.rangeClosed(1, n).mapToObj(i -> "\"t" + i + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+        return ch;
+    }
+
+    @Test void runTestsShowsTheFirstHalfAndSubmitRunsEverything() {
+        assertEquals(3, com.codeway.service.ChallengeService.visibleCount(challengeWithTests(3)));   // too few to hold any back
+        assertEquals(3, com.codeway.service.ChallengeService.visibleCount(challengeWithTests(4)));
+        assertEquals(3, com.codeway.service.ChallengeService.visibleCount(challengeWithTests(6)));
+        assertEquals(5, com.codeway.service.ChallengeService.visibleCount(challengeWithTests(9)));
+        var ch = challengeWithTests(6);
+        assertEquals(java.util.List.of("t1", "t2", "t3"), com.codeway.service.ChallengeService.visibleNames(ch));
+        var all = new RunResult(true, java.util.List.of(), "", "", java.util.List.of(
+                new RunResult.TestResult("t1", true, ""), new RunResult.TestResult("t2", true, ""), new RunResult.TestResult("t3", true, ""),
+                new RunResult.TestResult("t4", false, "edge"), new RunResult.TestResult("t5", true, ""), new RunResult.TestResult("t6", true, "")), false, 0, 5);
+        var shown = com.codeway.service.ChallengeService.onlyVisible(ch, all);
+        assertEquals(3, shown.total());
+        assertTrue(shown.allPassed());          // the hidden edge case that fails is not shown by "Run tests"
+        assertEquals(6, all.total());           // Submit grades the whole result
+    }
 }

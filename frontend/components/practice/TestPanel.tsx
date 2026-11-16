@@ -11,13 +11,15 @@ export const STEP_MS = 260;
  * a time with a running "Tests k/n" counter; a failed test shows the message of what it expected. Mount with a new `key` per
  * run to replay the animation.
  */
-export default function TestPanel({ run, names, running, submitting, animate = true, onPlayed }: {
+export default function TestPanel({ run, names, hidden = 0, running, submitting, animate = true, onPlayed }: {
   run: RunResp | null; names: string[]; running: boolean; submitting: boolean;
+  /** how many more tests run only on Submit */
+  hidden?: number;
   /** play the one-by-one reveal; false shows the results at once (coming back to the tab, or a past attempt) */
   animate?: boolean; onPlayed?: () => void;
 }) {
   const tests = run?.compiled ? run.tests : [];
-  const total = tests.length || names.length;
+  const total = running && submitting ? names.length + hidden : tests.length || names.length;
   const [shown, setShown] = useState(animate ? 0 : tests.length);
   useEffect(() => {
     if (!animate || !tests.length) return;
@@ -54,13 +56,18 @@ export default function TestPanel({ run, names, running, submitting, animate = t
           const state = running ? "running" : t && i < shown ? (t.passed ? "pass" : "fail") : t ? "pending" : "idle";
           return (
             <li key={i} className={`rounded-xl px-3 py-2 text-[13.5px] transition-colors ${state === "pass" ? "bg-oksoft" : state === "fail" ? "bg-badsoft" : "bg-fill"}`}>
-              <p className="flex items-start gap-2.5 font-medium"><StateIcon state={state} /><span className="min-w-0">{t?.name ?? names[i]}</span></p>
+              <p className="flex items-start gap-2.5 font-medium"><StateIcon state={state} /><span className="min-w-0">{t?.name ?? names[i]}</span>{i >= names.length && <span className="chip !h-[18px] !px-1.5 !text-[10px]" title="This test only runs when you submit">Hidden</span>}</p>
               {state === "fail" && t.message && <p className="ml-[26px] mt-1.5 font-mono text-[12px] text-bad">{t.message}</p>}
             </li>
           );
         })}
       </ul>
-      {!run && !running && <p className="mt-3 text-[12.5px] text-label3">Press Run tests to check your code against these. Submit runs the very same tests, and when every one passes the challenge is complete.</p>}
+      {!running && hidden > 0 && tests.length <= names.length && (
+        <p className="mt-3 rounded-xl bg-fill px-3 py-2 text-[12.5px] text-label2">
+          {hidden === 1 ? "1 more test is" : `${hidden} more tests are`} hidden. {hidden === 1 ? "It runs" : "They run"} once, when you submit: edge cases that follow from the description.
+        </p>
+      )}
+      {!run && !running && <p className="mt-3 text-[12.5px] text-label3">Press Run tests to check your code against these{hidden > 0 ? ". Submit runs them again together with the hidden ones" : ". Submit runs the same tests"}, and when every one passes the challenge is complete.</p>}
     </div>
   );
 }

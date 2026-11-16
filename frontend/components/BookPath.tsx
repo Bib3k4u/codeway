@@ -189,9 +189,9 @@ function Legend() {
   const sw = (bg: string) => <span aria-hidden className="inline-block h-3 w-5 rounded-[3px]" style={{ background: bg, boxShadow: "inset 0 0 0 1px var(--book-edge)" }} />;
   return (
     <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-sep pt-3.5 text-[12px] text-label2">
-      <li className="flex items-center gap-2">{sw(COLORS[1])}Not started: its own colour, tagged &ldquo;Not started&rdquo;</li>
+      <li className="flex items-center gap-2">{sw(COLORS[1])}<span className="rounded-full bg-[rgba(15,23,42,0.82)] px-2 py-px text-[10.5px] font-bold text-white">Not started</span>its own colour</li>
       <li className="flex items-center gap-2">{sw(`linear-gradient(90deg, ${COLORS[3]} 55%, ${COVER} 55%)`)}Started: coloured in with your progress</li>
-      <li className="flex items-center gap-2">{sw(COLORS[3])}<Check size={13} aria-hidden />Mastered: fully coloured</li>
+      <li className="flex items-center gap-2">{sw(COLORS[3])}<span className="inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2 py-px text-[10.5px] font-bold text-white"><Check size={11} strokeWidth={3} aria-hidden />Mastered</span>fully coloured</li>
     </ul>
   );
 }
@@ -211,7 +211,7 @@ function Book({ c, n, color, open, onPick, onKeyDown }: { c: ConceptRow; n: numb
         {c.group && <span className="book-cat">{c.group}</span>}
       </span>
       <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] font-semibold tabular-nums opacity-95">
-        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : c.attempts === 0 ? <span className="book-tag">Not started</span> : <span className="whitespace-nowrap">{pct}% completed</span>}
+        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag book-tag-ok"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : c.attempts === 0 ? <span className="book-tag book-tag-new">Not started</span> : <span className="whitespace-nowrap">{pct}% completed</span>}
       </span>
     </span>
   );
