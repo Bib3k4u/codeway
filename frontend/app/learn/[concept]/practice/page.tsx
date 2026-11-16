@@ -774,7 +774,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
       )}
 
       {restored && (
-        <div className="pop pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+        <div className="pop pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2">
           <div className="sheet flex items-center gap-2.5 px-5 py-3 text-sm font-medium"><Check size={16} className="text-ok" />Welcome back. Your work was restored right where you left it.</div>
         </div>
       )}
@@ -816,7 +816,7 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose: ()
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
   return (
-    <div className="fade fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/40 p-4 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
+    <div className="fade fixed inset-0 z-[60] grid place-items-center overflow-auto bg-black/40 p-4 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true">
       {children}
     </div>
   );
