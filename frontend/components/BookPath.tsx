@@ -2,20 +2,29 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, BookOpen, Check, CheckCircle2, Flame, Play, Search, X } from "lucide-react";
+import BookCover, { COVER_H, COVER_W } from "@/components/BookCover";
 import ConceptIcon from "@/components/ConceptIcon";
 import Ring from "@/components/Ring";
 import { api, type ConceptRow, type HistoryRow, type Track } from "@/lib/api";
 import type { LangId } from "@/lib/lang";
 import { byTrack } from "@/lib/tracks";
 
-/** Cloth colours of the finished part of a book. Each is at least 4.9:1 against the white title text. */
-const COLORS = ["#0b7a67", "#c0392b", "#7144d6", "#2a62cf", "#25813a", "#b02d79", "#b4540f", "#4549bd", "#3f6f8f", "#8a4b2a"];
-/** The cloth of a book (or the part of it) that is not coloured in yet: the app's yellow (a muted gold in the dark theme, see globals.css). */
-const COVER = "var(--book-cover)";
-/** How long a book takes to slide back into the pile before the next one comes out. */
-const RETURN_MS = 420;
+/** Spine colours, sampled from the reference shelf, in its order. */
+const COLORS = ["#6b39df", "#da48a4", "#9acb45", "#4068df", "#54e0e2", "#de4739", "#67c33f", "#49c869", "#de7340", "#de496e", "#cdce47", "#3d37df", "#4ecc9b", "#4acb42"];
+/** Dark title text on the light spines, white on the rest, whichever reads better. */
+const inkOf = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((i) => { const v = parseInt(hex.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.46 ? "#14110a" : "#ffffff";
+};
+/** How long a book takes to flip shut before the next one opens. */
+const RETURN_MS = 480;
 
 const hash = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+/** How tall a book stands: a little different for each, never taller than its open cover. */
+const spineH = (c: ConceptRow) => 216 + (hash(c.id) % 6) * 10;
+/** The last book leans against the one before it: its foot sits this far from that book's side, so its top just touches it. */
+const LEAN_DEG = 10;
+const leanGap = (against: number) => Math.round(against * Math.tan((LEAN_DEG * Math.PI) / 180));
 const pctOf = (c: ConceptRow) => (c.practice && c.attempts > 0 ? Math.round(Math.max(0, Math.min(1, c.progress)) * 100) : 0);
 /** Share of the book that is coloured: all of it for a book not started yet (it wears its own colour, tagged "Not started") and once mastered, otherwise how far you are (a sliver once started, so it shows). */
 const fillOf = (c: ConceptRow) => (!c.practice || c.mastered || c.attempts === 0 ? 1 : Math.max(0.07, Math.min(1, c.progress)));
@@ -101,7 +110,7 @@ function TrackSection({ track, rows, shown, language, jump, onJump }: { track: T
       setOpen({ id, out: false });
       if (window.innerWidth < 1024) setTimeout(() => cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60);
     };
-    if (open && !open.out) { if (open.id === id) putBack(); else putBack(show); } else show();
+    if (open && !open.out && open.id === id) putBack(); else show();   // another book open: it closes as this one opens
   }, [open, putBack]);
 
   // a "Builds on" chip somewhere asked for one of our books
@@ -128,7 +137,7 @@ function TrackSection({ track, rows, shown, language, jump, onJump }: { track: T
   }, [open, history, language]);
 
   const move = (e: React.KeyboardEvent, i: number) => {
-    const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!d) return;
     e.preventDefault();
     (e.currentTarget.closest("ol")?.querySelectorAll<HTMLButtonElement>("button.book")[i + d])?.focus();
@@ -154,83 +163,91 @@ function TrackSection({ track, rows, shown, language, jump, onJump }: { track: T
         </span>
       </header>
 
-      {/* the card is as tall as six books on the shelf, and the shelf stands on its bottom edge, so every track lines up */}
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:items-end">
-        <div className="min-w-0 pb-2 lg:pb-0">
-          <ol className="book-pile flex flex-col gap-[3px]" aria-label={`${track.title}: ${shown.length} of ${rows.length} books, in learning order`}>
-            {shown.map((c, k) => {
-              const i = rows.indexOf(c);   // numbers and colours stay the book's own while a search hides its neighbours
-              return <Book key={c.id} c={c} n={i + 1} color={COLORS[i % COLORS.length]} open={!!open && !open.out && open.id === c.id} onPick={() => pick(c.id)} onKeyDown={(e) => move(e, k)} />;
-            })}
-          </ol>
-          <div aria-hidden className="book-shelf" />
-        </div>
+      {/* the shelf: upright spines of different heights, one leaning; an open book is turned to show its cover */}
+      <div className="book-shelf-wrap">
+        <ol className="book-row" aria-label={`${track.title}: ${shown.length} of ${rows.length} books, in learning order`}>
+          {shown.map((c, k) => {
+            const i = rows.indexOf(c);   // numbers and colours stay the book's own while a search hides its neighbours
+            return <Book key={c.id} c={c} n={i + 1} total={rows.length} color={COLORS[i % COLORS.length]} trackTitle={track.title} leanOn={k === shown.length - 1 && k >= 3 ? spineH(shown[k - 1]) : undefined}
+              open={!!open && !open.out && open.id === c.id} onPick={() => pick(c.id)} onKeyDown={(e) => move(e, k)} />;
+          })}
+        </ol>
+        <div aria-hidden className="book-shelf" />
+      </div>
 
-        <div ref={cardRef} className="min-w-0 scroll-mt-24">
-          {openRow ? (
-            <BookCard key={openRow.id} c={openRow} order={index + 1} total={rows.length} color={COLORS[index % COLORS.length]} language={language} out={open!.out}
-              history={history[openRow.id]} requires={openRow.requires ?? []} onClose={() => putBack()} onGo={onJump} />
-          ) : (
-            <div className="card rise flex min-h-[260px] flex-col justify-center px-7 py-5 lg:h-[var(--card-h)]">
-              <p className="eyebrow mb-2">Track {track.order}</p>
-              <h4 className="display text-[26px]">Pick a book</h4>
-              <p className="mt-2 max-w-[48ch] text-[14px] leading-snug text-label2">Pull one out of the pile to see what is inside and where you stand. Books fill with colour as you progress.</p>
-              {upNext && <button className="btn btn-primary mt-4 self-start" onClick={() => pick(upNext.id)}>{mastered === 0 && !upNext.attempts ? "Open the first book" : "Open your next book"}<ArrowRight size={16} /></button>}
-              <Legend />
-            </div>
-          )}
-        </div>
+      {/* the card sits right under the shelf */}
+      <div ref={cardRef} className="mt-7 min-w-0 scroll-mt-24">
+        {openRow ? (
+          <BookCard key={openRow.id} c={openRow} order={index + 1} total={rows.length} color={COLORS[index % COLORS.length]} language={language} out={open!.out}
+            history={history[openRow.id]} requires={openRow.requires ?? []} onClose={() => putBack()} onGo={onJump} />
+        ) : (
+          <div className="card rise flex min-h-[220px] flex-col justify-center px-7 py-5">
+            <p className="eyebrow mb-2">Track {track.order}</p>
+            <h4 className="display text-[26px]">Pick a book</h4>
+            <p className="mt-2 max-w-[56ch] text-[14px] leading-snug text-label2">Click a book on the shelf to turn it around: you will see its cover, what is inside and where you stand. Books fill with colour as you progress.</p>
+            {upNext && <button className="btn btn-primary mt-4 self-start" onClick={() => pick(upNext.id)}>{mastered === 0 && !upNext.attempts ? "Open the first book" : "Open your next book"}<ArrowRight size={16} /></button>}
+            <Legend />
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
 function Legend() {
-  const sw = (bg: string) => <span aria-hidden className="inline-block h-3 w-5 rounded-[3px]" style={{ background: bg, boxShadow: "inset 0 0 0 1px var(--book-edge)" }} />;
   return (
     <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2 border-t border-sep pt-3.5 text-[12px] text-label2">
-      <li className="flex items-center gap-2">{sw(COLORS[1])}<span className="rounded-full bg-[rgba(15,23,42,0.82)] px-2 py-px text-[10.5px] font-bold text-white">Not started</span>its own colour</li>
-      <li className="flex items-center gap-2">{sw(`linear-gradient(90deg, ${COLORS[3]} 55%, ${COVER} 55%)`)}Started: coloured in with your progress</li>
-      <li className="flex items-center gap-2">{sw(COLORS[3])}<span className="inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2 py-px text-[10.5px] font-bold text-white"><Check size={11} strokeWidth={3} aria-hidden />Mastered</span>fully coloured</li>
+      <li className="flex items-center gap-2"><span className="text-[9px] font-bold tracking-wide">NEW</span>Not started</li>
+      <li className="flex items-center gap-2"><span aria-hidden className="relative inline-block h-4 w-3 overflow-hidden rounded-[3px]" style={{ background: COLORS[6] }}><i className="absolute inset-y-0 left-0 w-[3px] bg-black/55" /></span>Started: a strip on the spine fills up with your progress</li>
+      <li className="flex items-center gap-2"><span className="inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2 py-px text-[10.5px] font-bold text-white"><Check size={11} strokeWidth={3} aria-hidden />Mastered</span>fully coloured</li>
+      <li className="flex items-center gap-2"><span aria-hidden className="inline-flex gap-[3px]"><i className="h-1.5 w-1.5 rounded-full bg-label2" /><i className="h-1.5 w-1.5 rounded-full bg-label2" /><i className="h-1.5 w-1.5 rounded-full border border-label3" /></span>Dots: your streak of clean passes</li>
     </ul>
   );
 }
 
-/** One book lying in the pile. It slides out a little on hover and a long way when it is the open one. */
-function Book({ c, n, color, open, onPick, onKeyDown }: { c: ConceptRow; n: number; color: string; open: boolean; onPick: () => void; onKeyDown: (e: React.KeyboardEvent) => void }) {
+/**
+ * One book standing on the shelf: a spine, coloured in from the bottom as far as your progress. Opening it turns the book around
+ * (the spine swings away while the cover swings in) and the neighbours slide apart to make room.
+ */
+function Book({ c, n, total, color, trackTitle, leanOn, open, onPick, onKeyDown }: {
+  c: ConceptRow; n: number; total: number; color: string; trackTitle: string; leanOn?: number; open: boolean; onPick: () => void; onKeyDown: (e: React.KeyboardEvent) => void;
+}) {
   const p = fillOf(c);
   const h = hash(c.id);
   const pct = pctOf(c);
-  const cloth = p <= 0 ? COVER : p >= 1 ? color : `linear-gradient(90deg, ${color} 0, ${color} ${p * 100}%, ${COVER} calc(${p * 100}% + 3px), ${COVER} 100%)`;
-  // the title is drawn twice: white over the coloured part, dark over the yellow part, each copy clipped to its own region
-  const text = (key: string, hidden: boolean, style: React.CSSProperties) => (
-    <span key={key} aria-hidden={hidden || undefined} className="book-text" style={style}>
-      <span className="w-5 shrink-0 text-[11px] font-semibold tabular-nums opacity-80">{String(n).padStart(2, "0")}</span>
-      <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate text-[14px] font-semibold tracking-tight">{c.title}</span>
-        {c.group && <span className="book-cat">{c.group}</span>}
-      </span>
-      <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] font-semibold tabular-nums opacity-95">
-        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag book-tag-ok"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : c.attempts === 0 ? <span className="book-tag book-tag-new">Not started</span> : <span className="whitespace-nowrap">{pct}% completed</span>}
-      </span>
-    </span>
-  );
-  const light: React.CSSProperties = { color: "#fff", clipPath: p >= 1 ? undefined : `inset(0 ${100 - p * 100}% 0 0)` };
-  const dark: React.CSSProperties = { color: "var(--book-cover-ink)", textShadow: "none", clipPath: p <= 0 ? undefined : `inset(0 0 0 ${p * 100}%)` };
-  const bandOnColour = (side: "left" | "right") => (side === "left" ? p > 0 : p >= 0.95);
-  const band = (side: "left" | "right", at: number, faint: boolean) => (
-    <span aria-hidden className="book-band" style={{ [side]: at, opacity: faint ? 0.5 : 1, background: bandOnColour(side) ? "rgba(255,255,255,0.45)" : "var(--book-band-cover)" }} />
-  );
+  const width = 46 + ((h >> 3) % 4) * 3;
+  // a leaning book is a little taller than the one it rests on, so its top edge catches that book's side
+  const height = leanOn ? Math.min(COVER_H, leanOn + 18) : spineH(c);
+  const scale = Math.min(1, height / COVER_H);   // the open cover is exactly as tall as the book was
+  const abbr = (c.group ? c.group.slice(0, 3) : c.track).toUpperCase();
+  const badge = !c.practice ? null
+    : c.mastered ? <span className="book-mark bg-[#16a34a] text-white" title="Mastered"><Check size={11} strokeWidth={3.5} aria-hidden /></span>
+    : c.attempts === 0 ? <span className="text-[9px] font-bold tracking-wide">NEW</span>
+    : <span className="text-[10px] font-bold tabular-nums">{pct}%</span>;
+  const status = !c.practice ? <span className="text-[11px] opacity-80">Lesson</span>
+    : c.mastered ? <span className="book-tag book-tag-ok"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span>
+    : c.attempts === 0 ? <span className="book-tag book-tag-new">Not started</span>
+    : <span className="text-[11px] font-semibold tabular-nums">{pct}% done</span>;
+  const dots = c.mastered ? 3 : Math.min(3, c.streak);
   return (
-    <li style={{ marginLeft: (h % 4) * 3 }}>
+    <li className={`book-slot ${open ? "is-open" : ""} ${leanOn ? "is-leaning" : ""}`}
+      style={{ "--w": `${width}px`, "--h": `${height}px`, "--cw": `${Math.round(COVER_W * scale)}px`, "--s": scale.toFixed(3),
+        "--tilt": `${leanOn ? -LEAN_DEG : 0}deg`, "--lean-gap": `${leanOn ? leanGap(leanOn) - 6 : 0}px` } as React.CSSProperties}>
       <button type="button" className="book" aria-pressed={open} onClick={onPick} onKeyDown={onKeyDown}
-        aria-label={`${n}. ${c.title}${c.group ? ` (${c.group})` : ""}: ${c.practice ? `${pct}% complete${c.mastered ? ", mastered" : ""}` : "lesson"}`}
-        style={{ width: 322 + (h % 5) * 6, background: cloth }}>
-        <span aria-hidden className="book-sheen" />
-        {p < 1 && <span aria-hidden className="book-edge" />}
-        {band("left", 11, false)}{band("left", 16, true)}{band("right", 16, true)}{band("right", 11, false)}
-        {p > 0 && text("light", false, light)}
-        {p < 1 && text("dark", p > 0, dark)}
+        aria-label={`${n}. ${c.title}${c.group ? ` (${c.group})` : ""}: ${c.practice ? `${pct}% complete${c.mastered ? ", mastered" : ""}` : "lesson"}. ${open ? "Close" : "Open"} the book`}>
+        <span className="book-spine" style={{ background: color, color: inkOf(color) }}>
+          <span aria-hidden className="book-sheen" />
+          {p < 1 && <span aria-hidden className="book-meter" style={{ height: `${p * 100}%` }} />}
+          <span className="absolute inset-x-0 top-2 flex justify-center">{badge}</span>
+          <span className="book-title"><span style={{ maxHeight: height - 78 }}>{c.title}</span></span>
+          <span className="absolute inset-x-0 bottom-2 flex flex-col items-center gap-1">
+            <span className="text-[9px] font-bold tracking-wide opacity-85">{abbr}</span>
+            <span className="flex gap-[3px]" aria-hidden>{[0, 1, 2].map((d) => <i key={d} className={`h-[5px] w-[5px] rounded-full ${d < dots ? "bg-current" : "bg-current opacity-30"}`} />)}</span>
+          </span>
+        </span>
+        <span className="book-front">
+          <span className="book-front-inner"><BookCover id={c.id} title={c.title} kicker={c.group ? `${trackTitle} · ${c.group}` : trackTitle} order={n} total={total} color={color} status={status} /></span>
+        </span>
       </button>
     </li>
   );
@@ -245,7 +262,7 @@ function BookCard({ c, order, total, color, language, out, history, requires, on
   const when = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const pct = pctOf(c);
   return (
-    <div className={`card relative flex min-h-[300px] flex-col overflow-hidden transition-[opacity,transform] duration-300 lg:h-[var(--card-h)] ${out ? "translate-x-3 opacity-0" : "book-card-in"}`}>
+    <div className={`card relative flex flex-col overflow-hidden transition-[opacity,transform] duration-300 ${out ? "translate-y-2 opacity-0" : "book-card-in"}`}>
       <span aria-hidden className="h-1 shrink-0" style={{ background: color }} />
       <button className="btn btn-icon btn-sm btn-ghost absolute right-2.5 top-3.5 z-[2]" onClick={onClose} aria-label="Close and put the book back"><X size={17} /></button>
 
