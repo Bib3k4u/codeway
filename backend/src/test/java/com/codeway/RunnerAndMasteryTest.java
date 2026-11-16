@@ -25,6 +25,18 @@ class RunnerAndMasteryTest {
         assertEquals(2, r.total());
     }
 
+    @Test void checkModeReportsCompileErrorsWithoutRunning() {
+        var bad = runner.run(Map.of("Car.java", "public class Car {\n    public String getMake() {\n        // return make;\n        return 1;\n    }\n}\n"), Map.of(), CodeRunner.Mode.CHECK);
+        assertFalse(bad.compiled());
+        assertEquals(4, bad.diagnostics().get(0).line());
+        assertTrue(bad.diagnostics().get(0).message().contains("incompatible types: int cannot be converted to String"), bad.diagnostics().get(0).message());
+        // valid code: compiles, nothing runs (no Main needed), no output
+        var ok = runner.run(Map.of("Car.java", "public class Car { public String getMake() { return \"x\"; } }"), Map.of(), CodeRunner.Mode.CHECK);
+        assertTrue(ok.compiled());
+        assertTrue(ok.diagnostics().isEmpty());
+        assertEquals("", ok.stdout());
+    }
+
     @Test void failingSolutionReportsMessages() {
         var r = runner.run(Map.of("Calc.java", "public class Calc { static int add(int a, int b){ return a*b; } }"),
                 Map.of("TestMain.java", TESTS), CodeRunner.Mode.TESTS);
@@ -91,6 +103,52 @@ class RunnerAndMasteryTest {
         }
         // a miss can lower it, by at most 0.10
         assertEquals(0.5, MasteryService.nextScoreForTest(0.6, 0.0, 0.99, false), 1e-9);
+    }
+
+    @Test void scoreRouteNeedsAHighScoreSolidPassAndHardChallenge() {
+        assertTrue(MasteryService.masteredByScore(0.86, 3, 5, 0.8, true));
+        assertFalse(MasteryService.masteredByScore(0.80, 5, 5, 1.0, true), "score below the line");
+        assertFalse(MasteryService.masteredByScore(0.90, 2, 5, 1.0, true), "not enough passes behind it");
+        assertFalse(MasteryService.masteredByScore(0.90, 5, 3, 1.0, true), "challenge too easy");
+        assertFalse(MasteryService.masteredByScore(0.90, 5, 5, 0.6, true), "leaned on hints for this pass");
+        assertFalse(MasteryService.masteredByScore(0.90, 5, 5, 0.9, false), "not a full pass");
+    }
+
+    /** A learner who takes a light hint on every challenge (so the 3-clean streak never builds) still gets there by score. */
+    @Test void aLearnerWhoNeedsHintsStillMasters() {
+        for (double perf : new double[] {0.92, 0.80, 0.70}) {   // a level-1 hint, a level-2 hint, a level-2 hint plus a resubmit
+            double score = MasteryService.INITIAL_SCORE; int passes = 0, tries = 0; boolean mastered = false;
+            while (!mastered && tries < 40) {
+                int d = MasteryService.targetDifficulty(score);
+                double expected = 1.0 / (1.0 + Math.exp(-8.0 * (score - (0.1 + (d - 1) * 0.2))));
+                score = MasteryService.nextScoreForTest(score, perf, expected, true);
+                passes++; tries++;
+                mastered = MasteryService.masteredByScore(score, passes, d, perf, true);
+            }
+            assertTrue(mastered, "perf " + perf + " should master within 40 attempts, score reached " + score);
+        }
+        // leaning on the solution (perf 0.2) must not
+        double score = MasteryService.INITIAL_SCORE; int passes = 0; boolean mastered = false;
+        for (int i = 0; i < 40; i++) {
+            int d = MasteryService.targetDifficulty(score);
+            double expected = 1.0 / (1.0 + Math.exp(-8.0 * (score - (0.1 + (d - 1) * 0.2))));
+            score = MasteryService.nextScoreForTest(score, 0.2, expected, true); passes++;
+            mastered |= MasteryService.masteredByScore(score, passes, d, 0.2, true);
+        }
+        assertFalse(mastered);
+    }
+
+    @Test void progressShowsTheCloserRouteAndNeverFullBeforeMastery() {
+        var m = new com.codeway.domain.ConceptMastery();
+        assertEquals(0.0, MasteryService.progress(m), 1e-9);
+        m.attemptsCount = 2; m.score = 0.425; m.streak = 1;
+        assertEquals(0.5, MasteryService.progress(m), 1e-9);          // by score: 0.425 / 0.85
+        m.score = 0.2; m.streak = 2;
+        assertEquals(2.0 / 3, MasteryService.progress(m), 1e-9);      // by streak
+        m.score = 0.99; m.streak = 0;
+        assertEquals(0.99, MasteryService.progress(m), 1e-9);         // high score but not yet qualified
+        m.mastered = true;
+        assertEquals(1.0, MasteryService.progress(m), 1e-9);
     }
 
     @Test void fluencyReadsBehaviourNotSelfRating() {

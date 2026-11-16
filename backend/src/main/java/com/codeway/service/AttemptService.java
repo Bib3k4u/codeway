@@ -193,6 +193,27 @@ public class AttemptService {
         return view;
     }
 
+    // ---- live check (compile only) ----
+    private final Map<Long, Long> lastCheck = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Compile-only check of what the learner has typed, for the error squiggles in the editor. It is not a run: it never touches
+     * the attempt's counters, the saved draft or the clock. Throttled per learner, and skipped (not queued) when the runner is busy.
+     */
+    public Map<String, Object> check(Long userId, Long attemptId, Map<String, String> files) {
+        Attempt a = owned(userId, attemptId);
+        Map<String, Object> skipped = Map.of("compiled", true, "diagnostics", List.of(), "skipped", true);
+        if (files == null || files.isEmpty() || files.size() > 30
+                || files.values().stream().mapToLong(v -> v == null ? 0 : v.length()).sum() > 300_000) return skipped;
+        long now = System.nanoTime();
+        Long prev = lastCheck.put(userId, now);
+        if (prev != null && now - prev < 800_000_000L) return skipped;
+        Challenge ch = challenges.findById(a.challengeId).orElseThrow();
+        RunResult r = runner.run(ch.language, files, Map.of(), CodeRunner.Mode.CHECK);
+        if (RunResult.BUSY.equals(r.stderr())) return skipped;
+        return Map.of("compiled", r.compiled(), "diagnostics", r.diagnostics(), "skipped", false);
+    }
+
     // ---- submit ----
     /**
      * Grades against the hidden tests. A submission that doesn't pass every test does NOT end the attempt: it is
@@ -481,7 +502,7 @@ public class AttemptService {
     // ---- views ----
     public Map<String, Object> masteryView(ConceptMastery m) {
         return Map.of("score", round(m.score), "streak", m.streak, "mastered", m.mastered,
-                "streakGoal", MasteryService.MASTERY_STREAK, "attempts", m.attemptsCount);
+                "streakGoal", MasteryService.MASTERY_STREAK, "scoreGoal", MasteryService.MASTERY_SCORE, "attempts", m.attemptsCount);
     }
 
     private Map<String, Object> runView(RunResult r, Attempt a, Challenge ch) {
@@ -515,7 +536,9 @@ public class AttemptService {
             default -> {}
         }
         if (s.compileErrors() > 4) f.add(s.compileErrors() + " compile errors: read the first error carefully before running again.");
-        if (o.mastered()) f.add("Concept mastered. You passed " + MasteryService.MASTERY_STREAK + " challenges in a row at your level without help.");
+        if (o.mastered()) f.add(o.streak() >= MasteryService.MASTERY_STREAK
+                ? "Concept mastered. You passed " + MasteryService.MASTERY_STREAK + " challenges in a row at your level without help."
+                : "Concept mastered. Your mastery reached " + Math.round(o.scoreAfter() * 100) + "% across solid passes on hard challenges.");
         else if (o.cleanPass()) f.add("Clean pass: streak " + o.streak() + " of " + MasteryService.MASTERY_STREAK + ".");
         return f;
     }

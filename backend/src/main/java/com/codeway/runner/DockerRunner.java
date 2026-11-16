@@ -38,6 +38,8 @@ public class DockerRunner implements CodeRunner {
     @Value("${codeway.runner.runtime:}") private String runtime;
 
     private Semaphore slots;
+    /** Live checks while typing may use at most one of the runner's slots, so they can never crowd out a learner's Run. */
+    private final Semaphore checkSlot = new Semaphore(1);
 
     @PostConstruct
     void init() { slots = new Semaphore(Math.max(1, maxConcurrent), true); }
@@ -46,17 +48,25 @@ public class DockerRunner implements CodeRunner {
     public RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode) {
         long t0 = System.currentTimeMillis();
         Lang lang = Lang.of(language);
-        boolean acquired = false;
+        boolean acquired = false, checking = false;
         Path dir = null;
         try {
-            acquired = slots.tryAcquire(45, TimeUnit.SECONDS);
-            if (!acquired) return RunSupport.fail("The code runner is busy right now. Please try again in a moment.", t0);
+            if (mode == Mode.CHECK) {
+                // never queue behind real work: if there is no free slot right now, skip this check
+                checking = checkSlot.tryAcquire();
+                if (!checking) return RunSupport.busy(t0);
+                acquired = slots.tryAcquire(1, TimeUnit.SECONDS);
+                if (!acquired) return RunSupport.busy(t0);
+            } else {
+                acquired = slots.tryAcquire(45, TimeUnit.SECONDS);
+                if (!acquired) return RunSupport.fail("The code runner is busy right now. Please try again in a moment.", t0);
+            }
 
             dir = Files.createTempDirectory("codeway-run-");
             RunSupport.Prepared p = RunSupport.prepare(dir, lang, files, tests, mode);
             if (p.badFile() != null) return RunSupport.fail(List.of(new Diagnostic(p.badFile(), 1, "error", lang.badNameMessage())), t0);
             Lang.Plan plan = p.plan();
-            Files.writeString(dir.resolve("run.sh"), script(plan), StandardCharsets.UTF_8);
+            Files.writeString(dir.resolve("run.sh"), script(plan, mode == Mode.CHECK), StandardCharsets.UTF_8);
             openUp(dir); // the container runs as nobody (65534) and must be able to write into /work
 
             String name = "cw-" + UUID.randomUUID().toString().substring(0, 12);
@@ -76,6 +86,7 @@ public class DockerRunner implements CodeRunner {
                 if (diags.isEmpty()) diags = List.of(new Diagnostic("", 0, "error", check == 137 ? "Compiling took too long." : log.trim()));
                 return new RunResult(false, diags, "", "", List.of(), check == 137, check, System.currentTimeMillis() - t0);
             }
+            if (mode == Mode.CHECK) return new RunResult(true, diags, "", "", List.of(), false, 0, System.currentTimeMillis() - t0);
             Path runCode = dir.resolve("run.code");
             if (!Files.exists(runCode)) {
                 // The script writes run.code after the program ends. If the entry point exists but there is no exit code,
@@ -97,6 +108,7 @@ public class DockerRunner implements CodeRunner {
         } finally {
             if (dir != null) RunSupport.deleteQuietly(dir);
             if (acquired) slots.release();
+            if (checking) checkSlot.release();
         }
     }
 
@@ -118,12 +130,16 @@ public class DockerRunner implements CodeRunner {
     }
 
     /** The container's script: check (compile / syntax), then run the entry point if it exists. */
-    static String script(Lang.Plan plan) {
+    static String script(Lang.Plan plan) { return script(plan, false); }
+
+    /** @param checkOnly stop after the compile / syntax check (the live error markers) */
+    static String script(Lang.Plan plan, boolean checkOnly) {
         StringBuilder s = new StringBuilder("cd /work/src\n");
         if (plan.check() != null)
             s.append("timeout -s KILL ").append(CHECK_TIMEOUT_S).append(' ').append(cmd(plan.check())).append(" > ../check.log 2>&1\n");
         else s.append("true\n");
         s.append("echo $? > ../check.code\n");
+        if (checkOnly) return s.toString();
         s.append("if [ \"$(cat ../check.code)\" = \"0\" ] && [ -e ../").append(plan.entry()).append(" ]; then\n");
         s.append("  ").append(env(plan.run())).append("timeout -s KILL ").append(RUN_TIMEOUT_S).append(' ').append(cmd(plan.run()))
                 .append(" > ../run.out 2> ../run.err < /dev/null\n");

@@ -1,12 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
-import { ArrowRight, CheckCircle2, LayoutGrid, Clock, Flame, Target, Trophy, XCircle } from "lucide-react";
+import { ArrowRight, Route, Clock, Flame, Target, Trophy } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import BookPath from "@/components/BookPath";
-import Heatmap from "@/components/Heatmap";
 import { useConcepts } from "@/lib/concepts";
-import { LANGS, langLabel, type LangId } from "@/lib/lang";
+import { langLabel, type LangId } from "@/lib/lang";
 import { useTracks } from "@/lib/tracks";
 import { useAuth } from "@/lib/auth";
 import { useStats } from "@/lib/stats";
@@ -38,13 +37,8 @@ function Tile({ icon, tone, label, value, unit, sub }: { icon: ReactNode; tone: 
   );
 }
 
-const ago = (iso: string) => {
-  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
-};
-
 export default function Dashboard() {
-  const { user, setLanguage } = useAuth();
+  const { user } = useAuth();
   const { stats, error: statsError, refresh } = useStats();
   const { rows, refresh: refreshConcepts } = useConcepts();
   const tracks = useTracks();
@@ -60,7 +54,7 @@ export default function Dashboard() {
   const hours = stats ? Math.floor(stats.minutesCoding / 60) : 0;
 
   return (
-    <AppShell wide icon={LayoutGrid} crumb={<span className="font-medium text-label">Dashboard</span>}>
+    <AppShell wide icon={Route} crumb={<span className="font-medium text-label">Learning Path</span>}>
       {/* profile header */}
       <header className="glow rise mb-8 flex flex-wrap items-center justify-between gap-5">
         <div className="flex items-center gap-4">
@@ -75,11 +69,6 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-        <div className="seg" role="tablist" aria-label="Practice language">
-          {LANGS.map((l) => (
-            <button key={l.id} role="tab" aria-selected={l.id === language} onClick={() => l.id !== language && setLanguage(l.id)}>{l.label}</button>
-          ))}
-        </div>
         {next && (
           <Link href={`/learn/${next.id}${next.inProgress ? `/practice?lang=${language}` : ""}`} className="btn btn-primary btn-lg">
             {next.inProgress ? `Continue ${next.title}` : `Start ${next.title}`}<ArrowRight size={17} />
@@ -107,38 +96,6 @@ export default function Dashboard() {
             <Tile icon={<Clock size={17} />} tone="plain" label="Time coding" value={hours > 0 ? `${hours}h ${stats.minutesCoding % 60}` : stats.minutesCoding} unit={hours > 0 ? "m" : "min"} sub={`${stats.runs} runs · ${stats.hints} hints`} />
           </>
         )}
-      </div>
-
-      <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        {/* activity calendar */}
-        <Section title="Activity" meta={stats ? `${stats.yearTotal} correct ${stats.yearTotal === 1 ? "submission" : "submissions"} · ${stats.activeDays} days in the last year` : undefined}>
-          <div className="card p-5">{stats ? <Heatmap days={stats.days} today={stats.today} /> : <div className="skeleton h-[130px]" />}</div>
-        </Section>
-
-        <Section title="Recent submissions">
-          <div className="card divide-y divide-[var(--sep)]">
-            {!stats ? <div className="skeleton m-4 h-24" /> : stats.recent.length === 0 ? (
-              <p className="p-5 text-sm text-label3">Nothing submitted yet. Your results will show up here.</p>
-            ) : stats.recent.slice(0, 3).map((r, i) => {
-              const ok = r.total > 0 && r.passed === r.total;
-              return (
-                <Link key={i} href={`/learn/${r.concept}`} className="flex items-start gap-3 p-4 transition-colors hover:bg-fill">
-                  {ok ? <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-ok" aria-label="Passed" /> : <XCircle size={17} className="mt-0.5 shrink-0 text-bad" aria-label="Not passed" />}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[14px] font-medium">{r.title}</p>
-                    <p className="text-xs text-label3">{r.conceptTitle} · {r.passed}/{r.total} tests · {ago(r.at)}</p>
-                  </div>
-                  <span className={`text-xs font-semibold tabular-nums ${r.delta >= 0 ? "text-ok" : "text-bad"}`}>{r.delta >= 0 ? "+" : ""}{Math.round(r.delta * 100)}</span>
-                </Link>
-              );
-            })}
-            {stats && stats.recent.length > 0 && (
-              <Link href="/profile#history" className="flex items-center justify-center gap-1.5 p-3 text-[13px] font-semibold text-label2 transition-colors hover:bg-fill hover:text-label">
-                View all submissions<ArrowRight size={14} />
-              </Link>
-            )}
-          </div>
-        </Section>
       </div>
 
       <Section title="Your learning path" meta="Learn in this order: each track builds on the one before">

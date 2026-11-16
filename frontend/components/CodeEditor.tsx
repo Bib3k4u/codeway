@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import type { editor as MonacoNs } from "monaco-editor";
 import MonacoEditor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
 import type { Diagnostic } from "@/lib/api";
@@ -42,14 +43,22 @@ const beforeMount: BeforeMount = (monaco) => {
   });
 };
 
-export default function CodeEditor({ path, value, onChange, diagnostics, files, readOnly }: {
+/** Text to mark everywhere it appears in the open file (the project search). */
+export type Highlight = { query: string; cs: boolean };
+/** Ask the editor to select and scroll to a range of a file; `n` changes with every request so the same one can be repeated. */
+export type Reveal = { path: string; start: number; end: number; n: number };
+
+export default function CodeEditor({ path, value, onChange, diagnostics, files, readOnly, highlight, reveal }: {
   path: string; value: string; onChange: (v: string) => void; diagnostics: Diagnostic[];
+  highlight?: Highlight | null; reveal?: Reveal | null;
   /** every file in the project, so suggestions know classes in files that aren't open */
   files?: Record<string, string>;
   readOnly?: boolean;
 }) {
   const { resolvedTheme } = useTheme();
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const editorRef = useRef<MonacoNs.IStandaloneCodeEditor | null>(null);
+  const marks = useRef<MonacoNs.IEditorDecorationsCollection | null>(null);
 
   const applyMarkers = () => {
     const monaco = monacoRef.current;
@@ -67,6 +76,33 @@ export default function CodeEditor({ path, value, onChange, diagnostics, files, 
   useEffect(applyMarkers);
   useEffect(() => { if (files) setProjectFiles(files); }, [files]);
 
+  // project search: every match in this file is marked
+  const q = highlight?.query ?? "", cs = highlight?.cs ?? false;
+  useEffect(() => {
+    const ed = editorRef.current, model = ed?.getModel();
+    if (!ed || !model) return;
+    marks.current ??= ed.createDecorationsCollection();
+    marks.current.set(q ? model.findMatches(q, false, false, cs, null, false).map((m) => ({ range: m.range, options: { inlineClassName: "cw-find-match", overviewRuler: { color: "#d4b106", position: 4 } } })) : []);
+  }, [q, cs, value, path]);
+
+  // select and scroll to a match; the editor may still be switching to this file, so try again for a moment
+  const done = useRef(0);
+  useEffect(() => {
+    if (!reveal || reveal.n === done.current) return;
+    let tries = 0;
+    const go = () => {
+      const ed = editorRef.current, model = ed?.getModel();
+      if (ed && model && model.uri.path.replace(/^\//, "") === reveal.path) {
+        const a = model.getPositionAt(reveal.start), b = model.getPositionAt(reveal.end);
+        const range = { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column };
+        ed.setSelection(range); ed.revealRangeInCenterIfOutsideViewport(range); ed.focus();
+        done.current = reveal.n;
+      } else if (tries++ < 12) timer = setTimeout(go, 60);
+    };
+    let timer = setTimeout(go, 0);
+    return () => clearTimeout(timer);
+  }, [reveal, path]);
+
   return (
     <MonacoEditor
       height="100%" language={monacoLanguage(path)} path={path} value={value}
@@ -75,7 +111,7 @@ export default function CodeEditor({ path, value, onChange, diagnostics, files, 
       // two columns can show the same file, so closing one must not dispose the model the other still uses
       keepCurrentModel
       onMount={(editor, monaco) => {
-        monacoRef.current = monaco; applyMarkers();
+        monacoRef.current = monaco; editorRef.current = editor; marks.current = null; applyMarkers();
         // a model kept from an earlier challenge's file of the same name must not show its old text
         if (editor.getValue() !== value) editor.getModel()?.setValue(value);
       }}

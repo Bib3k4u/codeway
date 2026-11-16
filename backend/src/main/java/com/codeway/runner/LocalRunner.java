@@ -43,6 +43,7 @@ public class LocalRunner implements CodeRunner {
                     return new RunResult(false, diags, "", "", List.of(), c.timedOut, c.exit, System.currentTimeMillis() - t0);
                 }
             }
+            if (mode == Mode.CHECK) return new RunResult(true, diags, "", "", List.of(), false, 0, System.currentTimeMillis() - t0);
             if (!Files.exists(dir.resolve(p.plan().entry())))
                 return new RunResult(true, diags, "", p.plan().noEntryMsg(), List.of(), false, 1, System.currentTimeMillis() - t0);
 

@@ -151,6 +151,8 @@ final class RunSupport {
         return new RunResult(false, d, "", "", List.of(), false, 1, System.currentTimeMillis() - t0);
     }
 
+    static RunResult busy(long t0) { return new RunResult(true, List.of(), "", RunResult.BUSY, List.of(), false, 0, System.currentTimeMillis() - t0); }
+
     static RunResult fail(String message, long t0) { return fail(List.of(new Diagnostic("", 0, "error", message)), t0); }
 
     static void deleteQuietly(Path dir) {

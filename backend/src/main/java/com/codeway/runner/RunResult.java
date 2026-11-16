@@ -12,6 +12,9 @@ public record RunResult(
         int exitCode,
         long millis) {
 
+    /** Stderr of a CHECK that was skipped because the runner was busy: not an error, just no answer this time. */
+    public static final String BUSY = "@@busy";
+
     public record Diagnostic(String file, int line, String severity, String message) {}
     public record TestResult(String name, boolean passed, String message) {}
 

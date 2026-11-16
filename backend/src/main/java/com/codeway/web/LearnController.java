@@ -58,7 +58,8 @@ public class LearnController {
             row.put("requires", requires(c.id()));
             row.put("available", practice && challenges.hasContent(language, c.id()));
             row.put("score", AttemptService.round(m.score)); row.put("streak", m.streak);
-            row.put("progress", m.attemptsCount > 0 ? AttemptService.round(m.score) : 0.0);
+            row.put("progress", AttemptService.round(MasteryService.progress(m)));
+            row.put("scoreGoal", MasteryService.MASTERY_SCORE); row.put("streakGoal", MasteryService.MASTERY_STREAK);
             row.put("practice", practice);
             row.put("mastered", m.mastered); row.put("attempts", m.attemptsCount);
             row.put("inProgress", open.contains(c.id()));
@@ -92,6 +93,12 @@ public class LearnController {
     @PostMapping("/run")
     public Map<String, Object> run(HttpServletRequest req, @RequestBody RunReq b) {
         return attempts.run(uid(req), b.attemptId(), b.files(), b.mode());
+    }
+
+    /** Compile-only check while the learner types: error markers in the editor. Not a run. */
+    @PostMapping("/check")
+    public Map<String, Object> check(HttpServletRequest req, @RequestBody RunReq b) {
+        return attempts.check(uid(req), b.attemptId(), b.files());
     }
 
     @PostMapping("/attempts/{id}/submit")

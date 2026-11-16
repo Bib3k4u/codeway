@@ -9,11 +9,13 @@ export interface ConceptRow {
   available: boolean; inProgress: boolean; practice?: boolean; progress: number; score: number; streak: number; mastered: boolean; attempts: number;
   /** lessons to know first */
   requires?: Prereq[];
+  /** the two ways to master it: this many clean passes in a row, or this mastery score (0..1) with solid passes */
+  streakGoal?: number; scoreGoal?: number;
 }
 /** A lesson to know first. */
 export interface Prereq { id: string; title: string }
 export interface Lesson { title: string; contentMd: string; source: string; track?: string; practice?: boolean; requires?: Prereq[] }
-export interface MasteryView { score: number; streak: number; mastered: boolean; streakGoal: number; attempts: number }
+export interface MasteryView { score: number; streak: number; mastered: boolean; streakGoal: number; scoreGoal?: number; attempts: number }
 export interface Challenge {
   id: number; title: string; descriptionMd: string; difficulty: number; language?: string;
   scaffolding: "HEAVY" | "PARTIAL" | "BLANK"; expectedMinutes: number; files: Files;

@@ -13,5 +13,9 @@ public class ConceptMastery {
     public int streak = 0;
     public int attemptsCount = 0;
     public boolean mastered = false;
+    /** Fully passed graded attempts (nullable: rows from before this was tracked count as 0). */
+    public Integer passes;
     public Instant updatedAt = Instant.now();
+
+    public int passCount() { return passes == null ? 0 : passes; }
 }

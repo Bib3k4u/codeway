@@ -1,8 +1,9 @@
 "use client";
 import { useRef, useState } from "react";
 import { Columns2, FileCode2, X } from "lucide-react";
-import CodeEditor from "@/components/CodeEditor";
+import CodeEditor, { type Highlight, type Reveal } from "@/components/CodeEditor";
 import Splitter from "@/components/Splitter";
+import Tooltip from "@/components/Tooltip";
 import type { Diagnostic } from "@/lib/api";
 
 /** One column of the editor: its own row of open files and the one showing. */
@@ -76,8 +77,8 @@ type Zone = { gid: number; kind: "center" | "left" | "right" };
  * The code area: one to three columns, each with its own open files. Tabs can be dragged to reorder, to another column, or out
  * to a new one; a file dragged in from the list opens where it is dropped. The left and right edges of a column split it.
  */
-export default function EditorGroups({ groups, focusId, files, diagnostics, readOnly, drag, setDrag, onFocus, onSelect, onClose, onMove, onSplit, onSplitActive, onCloseGroup, onEdit }: {
-  groups: Group[]; focusId: number; files: Record<string, string>; diagnostics: Diagnostic[]; readOnly: boolean;
+export default function EditorGroups({ groups, focusId, files, diagnostics, readOnly, highlight, reveal, drag, setDrag, onFocus, onSelect, onClose, onMove, onSplit, onSplitActive, onCloseGroup, onEdit }: {
+  groups: Group[]; focusId: number; files: Record<string, string>; diagnostics: Diagnostic[]; readOnly: boolean; highlight?: Highlight | null; reveal?: Reveal | null;
   drag: Drag | null; setDrag: (d: Drag | null) => void;
   onFocus: (gid: number) => void; onSelect: (gid: number, name: string) => void; onClose: (gid: number, name: string) => void;
   onMove: (d: Drag, to: number, index: number) => void; onSplit: (d: Drag, at: number) => void;
@@ -156,18 +157,21 @@ export default function EditorGroups({ groups, focusId, files, diagnostics, read
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5 pr-1.5">
                   {canSplit && g.active && (
-                    <button className="btn btn-icon btn-sm btn-ghost" onClick={() => onSplitActive(g.id)} aria-label="Split the editor: show this file in a new column"
-                      title="Split: show this file in a new column. You can also drag a file here from the list."><Columns2 size={15} /></button>
+                    <Tooltip text="Split view: show this file in a new column beside this one. You can also drag a file in from the list">
+                      <button className="btn btn-icon btn-sm btn-ghost" onClick={() => onSplitActive(g.id)} aria-label="Split the editor: show this file in a new column"><Columns2 size={15} /></button>
+                    </Tooltip>
                   )}
                   {groups.length > 1 && (
-                    <button className="btn btn-icon btn-sm btn-ghost" onClick={() => onCloseGroup(g.id)} aria-label="Close this column" title="Close this column (its files stay in the list)"><X size={15} /></button>
+                    <Tooltip text="Close this column. Its files stay in the file list">
+                      <button className="btn btn-icon btn-sm btn-ghost" onClick={() => onCloseGroup(g.id)} aria-label="Close this column"><X size={15} /></button>
+                    </Tooltip>
                   )}
                 </div>
               </div>
 
               <div className={`relative min-h-0 flex-1 ${focused && groups.length > 1 ? "shadow-[inset_0_2px_0_var(--accent-fill)]" : ""}`}>
                 {g.active && files[g.active] !== undefined
-                  ? <CodeEditor path={g.active} value={files[g.active]} onChange={(v) => onEdit(g.active, v)} diagnostics={diagnostics} files={files} readOnly={readOnly} />
+                  ? <CodeEditor path={g.active} value={files[g.active]} onChange={(v) => onEdit(g.active, v)} diagnostics={diagnostics} files={files} readOnly={readOnly} highlight={highlight} reveal={g.id === focusId ? reveal : null} />
                   : <p className="grid h-full place-items-center px-6 text-center text-[13px] text-label3">Drag a file here from the list, or click one to open it.</p>}
                 {/* while a file is being dragged, the column shows where it would go */}
                 {drag && (

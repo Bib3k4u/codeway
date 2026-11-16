@@ -25,6 +25,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private static Rule ruleFor(String method, String path) {
         if (!"POST".equals(method) && !path.startsWith("/api/lessons")) return null;
         if (path.equals("/api/run")) return new Rule("run", 30, 60_000);
+        if (path.equals("/api/check")) return new Rule("check", 40, 60_000);   // live error markers while typing
         if (path.endsWith("/submit")) return new Rule("submit", 12, 60_000);
         if (path.endsWith("/hint")) return new Rule("hint", 10, 60_000);
         if (path.equals("/api/challenges/next")) return new Rule("next", 8, 60_000);  // may call the AI

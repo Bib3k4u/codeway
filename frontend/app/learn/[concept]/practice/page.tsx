@@ -15,12 +15,15 @@ import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, ApiError, saveDraftOnExit, type AttemptDetail, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, ApiError, saveDraftOnExit, type AttemptDetail, type Diagnostic, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel, { STEP_MS } from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
 import FloatingTip, { type Tip } from "@/components/FloatingTip";
 import GuidePanel from "@/components/practice/GuidePanel";
+import FileSearch from "@/components/practice/FileSearch";
+import type { Highlight, Reveal } from "@/components/CodeEditor";
+import { replaceAll, replaceOne, type Match } from "@/lib/search";
 import EditorGroups, { closeIn, moveTab, openIn, removeEverywhere, renameIn, splitOut, type Drag, type Group } from "@/components/practice/EditorGroups";
 import { duration } from "@/lib/time";
 
@@ -57,6 +60,15 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   const [groups, setGroups] = useState<Group[]>([{ id: 1, open: [], active: "" }]);
   const [focusId, setFocusId] = useState(1);
   const [drag, setDrag] = useState<Drag | null>(null);
+  // project search: the text marked in the editor, and the match the editor was last asked to show
+  const [find, setFind] = useState<Highlight | null>(null);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
+  const revealN = useRef(0);
+  // errors from a compile-only check of what is typed (see the effect below); a Run's own diagnostics replace them
+  const [live, setLive] = useState<Diagnostic[] | null>(null);
+  const initialFiles = useRef<Files | null>(null);
+  // the server has no live check (an older backend is running): say so instead of quietly showing no errors
+  const [checkMissing, setCheckMissing] = useState(false);
   const focusGroup = groups.find((g) => g.id === focusId) ?? groups[0];
   const active = focusGroup.active;
   const [busy, setBusy] = useState<Busy>(null);
@@ -197,6 +209,26 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
     return () => { document.removeEventListener("visibilitychange", flushNow); window.removeEventListener("pagehide", flushNow); };
   }, [attemptId, frozen]);
 
+  // ---- live errors: shortly after typing stops, the server compiles the project and the errors show in the editor ----
+  const checkSeq = useRef(0);
+  useEffect(() => {
+    if (!attemptId || frozen || files === initialFiles.current || Object.keys(files).length === 0) return;
+    const snapshot = files;
+    const t = setTimeout(async () => {
+      const seq = ++checkSeq.current;
+      try {
+        const r = await api<{ compiled: boolean; diagnostics: Diagnostic[]; skipped: boolean }>("/check", { attemptId, files: snapshot });
+        // only the newest answer for what is on screen now counts
+        setCheckMissing(false);
+        if (!r.skipped && seq === checkSeq.current && filesRef.current === snapshot) setLive(r.diagnostics);
+      } catch (e) {
+        // best-effort: the Run button still reports everything; only a missing endpoint is worth telling the learner
+        if (e instanceof ApiError && (e.status === 404 || e.status === 405)) setCheckMissing(true);
+      }
+    }, 1400);
+    return () => clearTimeout(t);
+  }, [files, attemptId, frozen]);
+
   // ---- load challenge (or resume the unfinished one) ----
   const started = useRef(-1);
   useEffect(() => {
@@ -216,7 +248,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
     req
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
-        saved.current = initial;
+        saved.current = initial; initialFiles.current = initial;
         setStart(r); setQuiz(r.guide?.quiz ?? null); setLeft(r.guide ? "steps" : "brief"); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
         const names = Object.keys(initial);
         const first = names.find((n) => /TODO/.test(initial[n])) ?? names[0];
@@ -246,7 +278,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
     if (mode === "tests") { setBottom("tests"); setConsoleOpen("1"); }
     try {
       const r = await api<RunResp>("/run", { attemptId, files, mode });
-      setRun(r); setConsoleOpen("1"); refreshStats();
+      setRun(r); setLive(null); setConsoleOpen("1"); refreshStats();
       if (mode === "tests") { setTestRun(r); setRunSeq((n) => n + 1); }
       setBottom(mode === "tests" && r.compiled ? "tests" : "console");
       if (!r.compiled && r.diagnostics[0]?.file && files[r.diagnostics[0].file] !== undefined) openFile(r.diagnostics[0].file);
@@ -263,7 +295,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
     try {
       await flush();
       const r = await api<SubmitResp>(`/attempts/${attemptId}/submit`, { files, finish });
-      setRun(r); refreshStats(); refreshConcepts();
+      setRun(r); setLive(null); refreshStats(); refreshConcepts();
       if (r.compiled) { setTestRun(r); setRunSeq((n) => n + 1); }
       if (r.compiled && r.tests.length) {   // let every test show its result before the sheet covers the screen
         setBusy(null); setSettling(true);
@@ -390,7 +422,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   }
 
   const endParty = useCallback(() => setParty(false), []);
-  const diagnostics = run?.diagnostics ?? [];
+  const diagnostics = live ?? run?.diagnostics ?? [];
   const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setQuiz(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
   const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
@@ -544,9 +576,11 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
               </button>
               {view ? <span className="chip">{langLabel(lang)}</span> : <LangMenu value={lang} onChange={switchLang} />}
               <span aria-hidden className="mx-1 h-5 w-px bg-sep" />
-              <div className="min-w-0 flex-1 truncate text-[12.5px] text-label3 max-md:hidden">
-                {view ? "Read-only: your code and results from this attempt" : frozen ? "Submitted: your code is kept as it was" : "Drag files to reorder them or into a column to split the view"}
-              </div>
+              <FileSearch files={files} canReplace={!frozen && !locked} onHighlight={setFind}
+                onJump={(m: Match) => { openFile(m.file); setReveal({ path: m.file, start: m.start, end: m.end, n: ++revealN.current }); }}
+                onReplace={(m, text) => setFiles((f) => replaceOne(f, m, text))}
+                onReplaceAll={(query, cs, text) => { const r = replaceAll(files, query, cs, text); setFiles(r.files); return r.count; }} />
+              <div className="flex-1" />
               <div className="flex shrink-0 items-center gap-2">
                 {start.startedAt && !view && (
                   <ChallengeClock key={start.startedAt} startedAt={start.startedAt} serverNow={start.serverNow} stopped={result !== null}
@@ -625,6 +659,11 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                     <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the Steps tab to start editing.
                   </p>
                 )}
+                {checkMissing && !frozen && (
+                  <p role="status" className="flex items-center gap-2 border-b border-sep bg-[var(--orange-soft)] px-4 py-2 text-[13px] text-warn">
+                    Live error checking isn&apos;t available on this server yet (it needs the latest backend, so restart it). Errors still show when you press Run.
+                  </p>
+                )}
                 {view && detail && (
                   <p role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
                     <Eye size={13} className="shrink-0" />
@@ -640,7 +679,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                     <span>Submitted: {result.passed} of {result.total} tests passed. Your code is kept as it was; look around as long as you like.</span>
                   </p>
                 )}
-                <EditorGroups groups={groups} focusId={focusGroup.id} files={files} diagnostics={diagnostics} readOnly={locked || frozen}
+                <EditorGroups groups={groups} focusId={focusGroup.id} files={files} diagnostics={diagnostics} readOnly={locked || frozen} highlight={find} reveal={reveal}
                   drag={drag} setDrag={setDrag} onFocus={setFocusId}
                   onSelect={(gid, name) => { setFocusId(gid); setGroups((gs) => openIn(gs, gid, name)); }}
                   onClose={(gid, name) => setGroups((gs) => closeIn(gs, gid, name))}

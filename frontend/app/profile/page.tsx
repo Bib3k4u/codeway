@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import AreaChart from "@/components/AreaChart";
+import Heatmap from "@/components/Heatmap";
 import { api, type ChallengeGroup, type HistoryItem, type HistoryPage, type HistorySummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { LANGS, langLabel } from "@/lib/lang";
@@ -22,13 +23,14 @@ const qs = (f: Filters) => Object.entries(f).filter(([, v]) => v).map(([k, v]) =
 /** Profile: name, totals, an activity chart, breakdowns by topic and language, and the full filterable history. */
 export default function Profile() {
   const { user } = useAuth();
-  const { stats } = useStats();
+  const { stats, refresh: refreshStats } = useStats();
   const [summary, setSummary] = useState<{ days: number; data: HistorySummary } | null>(null);
   const [range, setRange] = useState(30);
   const [metric, setMetric] = useState<"minutes" | "solved" | "submitted">("minutes");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [view, setView] = useState<"timeline" | "challenge">("timeline");
 
+  useEffect(() => { if (user) refreshStats(); }, [user, refreshStats]);
   useEffect(() => {
     if (!user) return;
     api<HistorySummary>(`/history/summary?days=${range}&tz=${new Date().getTimezoneOffset()}`).then((data) => setSummary({ days: range, data })).catch(() => {});
@@ -60,6 +62,15 @@ export default function Profile() {
         <Stat icon={<Flame size={15} />} label="Streak" value={stats?.currentStreak} sub={stats ? `best ${stats.longestStreak} ${stats.longestStreak === 1 ? "day" : "days"}` : ""} />
         <Stat icon={<Trophy size={15} />} label="Mastered" value={stats?.mastered} sub={stats ? `of ${stats.conceptCount} concepts` : ""} />
       </div>
+
+      {/* activity calendar: one square per day, shaded by correct submissions */}
+      <section className="mb-8">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="section-title">Activity</h2>
+          {stats && <span className="text-[13px] text-label3">{stats.yearTotal} correct {stats.yearTotal === 1 ? "submission" : "submissions"} · {stats.activeDays} days in the last year</span>}
+        </div>
+        <div className="card p-5">{stats ? <Heatmap days={stats.days} today={stats.today} /> : <div className="skeleton h-[130px]" />}</div>
+      </section>
 
       {/* activity chart */}
       <section className="card mb-8 p-5">

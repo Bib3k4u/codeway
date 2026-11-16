@@ -15,7 +15,22 @@ import java.time.Instant;
 @Service
 public class MasteryService {
     public static final double K = 0.30;
+    /**
+     * A concept is mastered by either of two routes, so needing a hint now and then can never trap a learner in a loop:
+     * <ol>
+     *   <li><b>Streak:</b> {@code MASTERY_STREAK} clean passes in a row (no hints, no resubmits) at or above their level.</li>
+     *   <li><b>Score:</b> the mastery score (which already weighs every challenge's difficulty, the help taken and the time) has
+     *       reached {@code MASTERY_SCORE}, backed by at least {@code MASTERY_MIN_PASSES} full passes, and the attempt that
+     *       crosses the line is itself a solid pass ({@code SOLID_PASS} or better, so at most a light hint) on a hard
+     *       challenge ({@code SCORE_ROUTE_MIN_DIFFICULTY} or above). A lucky guess, an easy challenge or a pass that leaned on the
+     *       solution cannot get there.</li>
+     * </ol>
+     */
     public static final int MASTERY_STREAK = 3;
+    public static final double MASTERY_SCORE = 0.85;
+    public static final int MASTERY_MIN_PASSES = 3;
+    public static final double SOLID_PASS = 0.70;
+    public static final int SCORE_ROUTE_MIN_DIFFICULTY = 4;
     public static final double INITIAL_SCORE = 0.15;
 
     /**
@@ -44,6 +59,24 @@ public class MasteryService {
         m.userId = userId; m.language = language; m.concept = concept;
         m.score = INITIAL_SCORE;
         return m;
+    }
+
+    /** The score route to mastery (see {@link #MASTERY_SCORE}): judged right after an attempt is graded. */
+    public static boolean masteredByScore(double scoreAfter, int passes, int challengeDifficulty, double performance, boolean fullPass) {
+        return fullPass && scoreAfter >= MASTERY_SCORE && passes >= MASTERY_MIN_PASSES
+                && challengeDifficulty >= SCORE_ROUTE_MIN_DIFFICULTY && performance >= SOLID_PASS;
+    }
+
+    /**
+     * How far along to mastery, 0..1: whichever route is closer, the streak or the score. Short of mastery it never reads
+     * 100%, so a full bar always means mastered.
+     */
+    public static double progress(ConceptMastery m) {
+        if (m.mastered) return 1.0;
+        if (m.attemptsCount <= 0) return 0.0;
+        double byStreak = Math.min(1.0, (double) m.streak / MASTERY_STREAK);
+        double byScore = Math.min(1.0, m.score / MASTERY_SCORE);
+        return Math.min(0.99, Math.max(byStreak, byScore));
     }
 
     /** Difficulty (1..5) the learner should currently be working at. */
@@ -126,7 +159,8 @@ public class MasteryService {
 
         m.score = after;
         m.attemptsCount++;
-        if (m.streak >= MASTERY_STREAK) m.mastered = true;
+        if (full) m.passes = m.passCount() + 1;
+        if (m.streak >= MASTERY_STREAK || masteredByScore(after, m.passCount(), challengeDifficulty, perf, full)) m.mastered = true;
         m.updatedAt = Instant.now();
         repo.save(m);
         return new Outcome(perf, expected, before, after, m.streak, m.mastered, clean && atTarget, flu, fluencyLabel(flu));

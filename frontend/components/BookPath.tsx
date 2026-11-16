@@ -211,7 +211,7 @@ function Book({ c, n, color, open, onPick, onKeyDown }: { c: ConceptRow; n: numb
         {c.group && <span className="book-cat">{c.group}</span>}
       </span>
       <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] font-semibold tabular-nums opacity-95">
-        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : c.attempts === 0 ? <span className="book-tag">Not started</span> : null}
+        {!c.practice ? "Lesson" : c.mastered ? <span className="book-tag"><Check size={12} strokeWidth={3} aria-hidden />Mastered</span> : c.attempts === 0 ? <span className="book-tag">Not started</span> : <span className="whitespace-nowrap">{pct}% completed</span>}
       </span>
     </span>
   );
@@ -265,7 +265,7 @@ function BookCard({ c, order, total, color, language, out, history, requires, on
               : <>
                 {c.mastered && <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>}
                 {c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
-                  : !c.mastered && (c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Streak {c.streak}/3</span> : <span className="chip">Not started</span>)}
+                  : !c.mastered && (c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Streak {c.streak}/{c.streakGoal ?? 3}</span> : <span className="chip">Not started</span>)}
               </>}
           </div>
           {requires.length > 0 && (
@@ -284,13 +284,18 @@ function BookCard({ c, order, total, color, language, out, history, requires, on
             <div className="flex items-center gap-4 rounded-2xl border border-sep bg-card2 px-3.5 py-3">
               <Ring value={pct / 100} size={64} stroke={7} mastered={c.mastered} label={false} />
               <dl className="grid flex-1 grid-cols-3 gap-2 text-center">
-                <div><dt className="eyebrow !tracking-wider">Progress</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{pct}%</dd></div>
+                <div><dt className="eyebrow !tracking-wider" title="How close you are to mastery, by streak or score, whichever is closer">To mastery</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{pct}%</dd></div>
                 <div><dt className="eyebrow !tracking-wider">Tries</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.attempts}</dd></div>
-                <div><dt className="eyebrow !tracking-wider">Streak</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.streak}/3</dd></div>
+                <div><dt className="eyebrow !tracking-wider">Streak</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.streak}/{c.streakGoal ?? 3}</dd></div>
               </dl>
             </div>
           ) : (
             <p className="rounded-2xl border border-sep bg-card2 p-3.5 text-[13px] leading-snug text-label2">Read the lesson now. Challenges for this book are on the way.</p>
+          )}
+          {c.practice && !c.mastered && (
+            <p className="text-[12px] leading-snug text-label3">
+              Master it with {c.streakGoal ?? 3} clean passes in a row (no hints), or by reaching {Math.round((c.scoreGoal ?? 0.85) * 100)}% with solid passes on hard challenges. Hints are fine; they just slow the score.
+            </p>
           )}
           {recent.length > 0 && (
             <div>
