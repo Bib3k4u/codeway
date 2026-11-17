@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
-import { Columns2, FileCode2, X } from "lucide-react";
+import { Columns2, FileCode2, Lock, X } from "lucide-react";
 import CodeEditor, { type Highlight, type Reveal } from "@/components/CodeEditor";
 import Splitter from "@/components/Splitter";
 import Tooltip from "@/components/Tooltip";
@@ -77,8 +77,8 @@ type Zone = { gid: number; kind: "center" | "left" | "right" };
  * The code area: one to three columns, each with its own open files. Tabs can be dragged to reorder, to another column, or out
  * to a new one; a file dragged in from the list opens where it is dropped. The left and right edges of a column split it.
  */
-export default function EditorGroups({ groups, focusId, files, diagnostics, readOnly, highlight, reveal, drag, setDrag, onFocus, onSelect, onClose, onMove, onSplit, onSplitActive, onCloseGroup, onEdit }: {
-  groups: Group[]; focusId: number; files: Record<string, string>; diagnostics: Diagnostic[]; readOnly: boolean; highlight?: Highlight | null; reveal?: Reveal | null;
+export default function EditorGroups({ groups, focusId, files, diagnostics, readOnly, lockedPaths = [], highlight, reveal, drag, setDrag, onFocus, onSelect, onClose, onMove, onSplit, onSplitActive, onCloseGroup, onEdit }: {
+  groups: Group[]; focusId: number; files: Record<string, string>; diagnostics: Diagnostic[]; readOnly: boolean; /** files shown but never editable */ lockedPaths?: string[]; highlight?: Highlight | null; reveal?: Reveal | null;
   drag: Drag | null; setDrag: (d: Drag | null) => void;
   onFocus: (gid: number) => void; onSelect: (gid: number, name: string) => void; onClose: (gid: number, name: string) => void;
   onMove: (d: Drag, to: number, index: number) => void; onSplit: (d: Drag, at: number) => void;
@@ -148,7 +148,7 @@ export default function EditorGroups({ groups, focusId, files, diagnostics, read
                           const r = e.currentTarget.getBoundingClientRect();
                           setSlot({ gid: g.id, index: k + (e.clientX > r.left + r.width / 2 ? 1 : 0) }); setZone(null);
                         }}>
-                        <FileCode2 size={14} />{n}
+                        <FileCode2 size={14} />{n}{lockedPaths.includes(n) && <Lock size={11} className="text-label3" aria-label="Provided: read-only" />}
                         {diagnostics.some((d) => d.file === n && d.severity === "error") && <span className="h-1.5 w-1.5 rounded-full bg-bad" />}
                         {showClose && <button aria-label={`Close ${n}`} draggable={false} onClick={(e) => { e.stopPropagation(); onClose(g.id, n); }} className="opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"><X size={13} /></button>}
                       </div>
@@ -171,7 +171,7 @@ export default function EditorGroups({ groups, focusId, files, diagnostics, read
 
               <div className={`relative min-h-0 flex-1 ${focused && groups.length > 1 ? "shadow-[inset_0_2px_0_var(--accent-fill)]" : ""}`}>
                 {g.active && files[g.active] !== undefined
-                  ? <CodeEditor path={g.active} value={files[g.active]} onChange={(v) => onEdit(g.active, v)} diagnostics={diagnostics} files={files} readOnly={readOnly} highlight={highlight} reveal={g.id === focusId ? reveal : null} />
+                  ? <CodeEditor path={g.active} value={files[g.active]} onChange={(v) => onEdit(g.active, v)} diagnostics={diagnostics} files={files} readOnly={readOnly || lockedPaths.includes(g.active)} highlight={highlight} reveal={g.id === focusId ? reveal : null} />
                   : <p className="grid h-full place-items-center px-6 text-center text-[13px] text-label3">Drag a file here from the list, or click one to open it.</p>}
                 {/* while a file is being dragged, the column shows where it would go */}
                 {drag && (

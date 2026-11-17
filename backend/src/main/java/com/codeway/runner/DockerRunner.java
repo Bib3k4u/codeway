@@ -45,7 +45,7 @@ public class DockerRunner implements CodeRunner {
     void init() { slots = new Semaphore(Math.max(1, maxConcurrent), true); }
 
     @Override
-    public RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode) {
+    public RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode, String stdin) {
         long t0 = System.currentTimeMillis();
         Lang lang = Lang.of(language);
         boolean acquired = false, checking = false;
@@ -66,7 +66,9 @@ public class DockerRunner implements CodeRunner {
             RunSupport.Prepared p = RunSupport.prepare(dir, lang, files, tests, mode);
             if (p.badFile() != null) return RunSupport.fail(List.of(new Diagnostic(p.badFile(), 1, "error", lang.badNameMessage())), t0);
             Lang.Plan plan = p.plan();
-            Files.writeString(dir.resolve("run.sh"), script(plan, mode == Mode.CHECK), StandardCharsets.UTF_8);
+            String input = RunSupport.stdinFor(mode, stdin);
+            if (input != null) Files.writeString(dir.resolve("stdin.txt"), input, StandardCharsets.UTF_8);
+            Files.writeString(dir.resolve("run.sh"), script(plan, mode == Mode.CHECK, input != null), StandardCharsets.UTF_8);
             openUp(dir); // the container runs as nobody (65534) and must be able to write into /work
 
             String name = "cw-" + UUID.randomUUID().toString().substring(0, 12);
@@ -133,7 +135,10 @@ public class DockerRunner implements CodeRunner {
     static String script(Lang.Plan plan) { return script(plan, false); }
 
     /** @param checkOnly stop after the compile / syntax check (the live error markers) */
-    static String script(Lang.Plan plan, boolean checkOnly) {
+    static String script(Lang.Plan plan, boolean checkOnly) { return script(plan, checkOnly, false); }
+
+    /** @param stdin the program reads the learner's custom input (stdin.txt) instead of nothing */
+    static String script(Lang.Plan plan, boolean checkOnly, boolean stdin) {
         StringBuilder s = new StringBuilder("cd /work/src\n");
         if (plan.check() != null)
             s.append("timeout -s KILL ").append(CHECK_TIMEOUT_S).append(' ').append(cmd(plan.check())).append(" > ../check.log 2>&1\n");
@@ -142,7 +147,7 @@ public class DockerRunner implements CodeRunner {
         if (checkOnly) return s.toString();
         s.append("if [ \"$(cat ../check.code)\" = \"0\" ] && [ -e ../").append(plan.entry()).append(" ]; then\n");
         s.append("  ").append(env(plan.run())).append("timeout -s KILL ").append(RUN_TIMEOUT_S).append(' ').append(cmd(plan.run()))
-                .append(" > ../run.out 2> ../run.err < /dev/null\n");
+                .append(" > ../run.out 2> ../run.err < ").append(stdin ? "../stdin.txt" : "/dev/null").append("\n");
         s.append("  echo $? > ../run.code\nfi\n");
         return s.toString();
     }

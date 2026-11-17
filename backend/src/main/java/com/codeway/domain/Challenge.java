@@ -27,6 +27,8 @@ public class Challenge {
      * "Guard:" (behaviour that must never break) or "S1:", "S2:"... (the steps). Null for ordinary challenges.
      */
     @Column(columnDefinition = "text") public String guideJson;
+    /** True when the main file is provided and read-only (see ConceptCatalog.mainProvided); null for challenges where the learner writes it. */
+    public Boolean mainLocked;
     /** Hash of a seeded challenge's content, so an edited seed is re-validated and updated in place. */
     public String contentHash;
     /** Version of the generation rules an AI challenge was made under (null: before versions). Older ones are no longer served. */

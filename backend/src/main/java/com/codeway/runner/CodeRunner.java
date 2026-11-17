@@ -12,8 +12,13 @@ public interface CodeRunner {
      * @param files    learner files (path -> content)
      * @param tests    hidden test files (path -> content); only used in TESTS mode
      * @param mode     MAIN runs the learner's entry file; TESTS runs the hidden test entry file; CHECK only compiles
+     * @param stdin    text the program reads from standard input (MAIN only; null or empty: nothing to read)
      */
-    RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode);
+    RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode, String stdin);
+
+    default RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode) {
+        return run(language, files, tests, mode, null);
+    }
 
     default RunResult run(Map<String, String> files, Map<String, String> tests, Mode mode) {
         return run(Lang.JAVA.id, files, tests, mode);

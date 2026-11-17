@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, Eye, Pencil, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, Trash2, XCircle, Trophy, Terminal } from "lucide-react";
+import { ArrowRight, Check, Eye, Pencil, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, TextCursorInput, Trash2, XCircle, Trophy, Terminal } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import Markdown from "@/components/Markdown";
 import Ring from "@/components/Ring";
@@ -75,6 +75,9 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   const [run, setRun] = useState<RunResp | null>(null);
   const [left, setLeft] = useState<"brief" | "steps" | "hints">("brief");
   const [bottom, setBottom] = useState<"console" | "tests">("console");
+  // text the program reads when it is run (stdin): lets a learner try their own values
+  const [stdin, setStdin] = useState("");
+  const [showInput, setShowInput] = useState(false);
   const [hints, setHints] = useState<Hint[]>([]);
   const [hintQuota, setHintQuota] = useState<QuotaState | null>(null);
   const [hintNote, setHintNote] = useState("");
@@ -277,7 +280,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
     setBusy(mode); setLastMode(mode);
     if (mode === "tests") { setBottom("tests"); setConsoleOpen("1"); }
     try {
-      const r = await api<RunResp>("/run", { attemptId, files, mode });
+      const r = await api<RunResp>("/run", { attemptId, files, mode, stdin: mode === "main" ? stdin : undefined });
       setRun(r); setLive(null); setConsoleOpen("1"); refreshStats();
       if (mode === "tests") { setTestRun(r); setRunSeq((n) => n + 1); }
       setBottom(mode === "tests" && r.compiled ? "tests" : "console");
@@ -463,6 +466,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   }
 
   const ch = start.challenge;
+  const providedFiles = ch.lockedFiles ?? [];
   const guide: Guide | null = start.guide ? { ...start.guide, quiz: quiz ?? start.guide.quiz } : null;
   const locked = !!guide && !guide.quiz.solved;
   const crumb = (
@@ -584,8 +588,8 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
               <span aria-hidden className="mx-1 h-5 w-px bg-sep" />
               <FileSearch files={files} canReplace={!frozen && !locked} onHighlight={setFind}
                 onJump={(m: Match) => { openFile(m.file); setReveal({ path: m.file, start: m.start, end: m.end, n: ++revealN.current }); }}
-                onReplace={(m, text) => setFiles((f) => replaceOne(f, m, text))}
-                onReplaceAll={(query, cs, text) => { const r = replaceAll(files, query, cs, text); setFiles(r.files); return r.count; }} />
+                onReplace={(m, text) => { if (!providedFiles.includes(m.file)) setFiles((f) => replaceOne(f, m, text)); }}
+                onReplaceAll={(query, cs, text) => { const mine = Object.fromEntries(Object.entries(files).filter(([n]) => !providedFiles.includes(n))); const r = replaceAll(mine, query, cs, text); setFiles((f) => ({ ...f, ...r.files })); return r.count; }} />
               <div className="flex-1" />
               <div className="flex shrink-0 items-center gap-2">
                 {start.startedAt && !view && (
@@ -630,14 +634,14 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                           aria-label={`Rename ${n}`} className="w-full rounded-lg bg-fill px-2 py-1.5 text-[13px] outline-none ring-2 ring-accent/40" />
                       );
                     }
-                    const showTip = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setFileTip({ text: mine ? `${n} (yours: double-click to rename)` : n, x: r.right, y: r.top + r.height / 2, place: "right", leftX: r.left }); };
+                    const showTip = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setFileTip({ text: mine ? `${n} (yours: double-click to rename)` : providedFiles.includes(n) ? `${n} (provided for you: read-only)` : n, x: r.right, y: r.top + r.height / 2, place: "right", leftX: r.left }); };
                     return (
                       <div key={n} className={`group flex w-full items-center rounded-lg text-[13px] ${n === active ? "bg-fill font-semibold text-label" : "text-label2 hover:bg-fill hover:text-label"}`}>
                         <button onClick={() => openFile(n)} onDoubleClick={() => { if (mine) startRename(n); }}
                           draggable onDragStart={(e) => { setFileTip(null); e.dataTransfer.setData("text/plain", n); e.dataTransfer.effectAllowed = "move"; setDrag({ name: n, from: null }); }} onDragEnd={() => setDrag(null)}
                           onMouseEnter={(e) => showTip(e.currentTarget)} onMouseLeave={() => setFileTip(null)} onFocus={(e) => showTip(e.currentTarget)} onBlur={() => setFileTip(null)}
                           className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
-                          <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>
+                          <FileCode2 size={14} className="shrink-0" /><span className="truncate">{n}</span>{providedFiles.includes(n) && <Lock size={11} className="shrink-0 text-label3" aria-label="Provided: read-only" />}
                         </button>
                         {mine && (deleting === n ? (
                           <button onClick={() => { deleteFile(n); setDeleting(null); }} onBlur={() => setDeleting(null)} autoFocus
@@ -660,6 +664,11 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
               </nav>
               <div className="hidden sm:flex"><Splitter orientation="vertical" label="Resize file list" onMove={moveFiles} onNudge={(d) => setFilesW(String(filesWidth + d))} onReset={() => setFilesW("176")} /></div>
               <div className="flex min-w-0 flex-1 flex-col">
+                {!frozen && providedFiles.includes(active) && (
+                  <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
+                    <Lock size={13} className="shrink-0" /><span><b className="font-semibold text-label">{active}</b> is provided for you and can&apos;t be edited. Press Run to see it use your classes. You write the other files.</span>
+                  </p>
+                )}
                 {locked && (
                   <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
                     <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the Steps tab to start editing.
@@ -685,7 +694,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                     <span>Submitted: {result.passed} of {result.total} tests passed. Your code is kept as it was; look around as long as you like.</span>
                   </p>
                 )}
-                <EditorGroups groups={groups} focusId={focusGroup.id} files={files} diagnostics={diagnostics} readOnly={locked || frozen} highlight={find} reveal={reveal}
+                <EditorGroups groups={groups} focusId={focusGroup.id} files={files} diagnostics={diagnostics} readOnly={locked || frozen} lockedPaths={providedFiles} highlight={find} reveal={reveal}
                   drag={drag} setDrag={setDrag} onFocus={setFocusId}
                   onSelect={(gid, name) => { setFocusId(gid); setGroups((gs) => openIn(gs, gid, name)); }}
                   onClose={(gid, name) => setGroups((gs) => closeIn(gs, gid, name))}
@@ -707,6 +716,12 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                 <button role="tab" className="ptab" aria-selected={bottom === "tests"} onClick={() => { setBottom("tests"); setConsoleOpen("1"); }}>{busy === "tests" || busy === "submit" ? <Loader2 size={13} className="animate-spin" /> : <TestTube2 size={13} />}Tests{busy !== "tests" && busy !== "submit" && testRun && testRun.tests.length > 0 && <span className={`text-[11px] ${passing === testRun.tests.length ? "text-ok" : "text-warn"}`}>{passing}/{testRun.tests.length}</span>}</button>
               </div>
               <div className="flex items-center gap-2">
+                {!frozen && (
+                  <button className={`btn btn-sm ${showInput ? "btn-secondary" : "btn-ghost"}`} aria-pressed={showInput} onClick={() => { setShowInput((v) => !v); setBottom("console"); setConsoleOpen("1"); }}
+                    title="Give your program your own input. Run feeds this text to whatever it reads (for example a Scanner or input())">
+                    <TextCursorInput size={14} />Custom input{stdin.trim() && <span aria-label="has input" className="h-1.5 w-1.5 rounded-full bg-[var(--accent-fill)]" />}
+                  </button>
+                )}
                 {run && busy !== "tests" && busy !== "submit" && <span className="text-xs text-label3">{run.compiled ? `Compiled · ${run.millis} ms` : "Compile failed"}</span>}
                 <button className="btn btn-icon btn-sm btn-ghost" onClick={() => setConsoleOpen(consoleOpen === "1" ? "0" : "1")} aria-label={consoleOpen === "1" ? "Collapse console" : "Expand console"} aria-expanded={consoleOpen === "1"}>
                   <ChevronDown size={16} className={`transition-transform ${consoleOpen === "1" ? "" : "rotate-180"}`} />
@@ -717,7 +732,20 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
               {bottom === "tests" ? (
                 <TestPanel key={runSeq} run={testRun} names={ch.testNames} hidden={ch.hiddenTests ?? 0} animate={playedSeq.current !== runSeq} onPlayed={() => { playedSeq.current = runSeq; }}
                   running={busy === "tests" || busy === "submit"} submitting={busy === "submit"} />
-              ) : !run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
+              ) : (<>
+                {showInput && !frozen && (
+                  <div className="mb-3 font-sans">
+                    <label htmlFor="stdin" className="mb-1 flex items-center justify-between text-[11.5px] font-semibold uppercase tracking-wider text-label3">
+                      Custom input
+                      <span className="font-normal normal-case tracking-normal">Run gives this text to your program, one line per line you type</span>
+                    </label>
+                    <textarea id="stdin" value={stdin} onChange={(e) => setStdin(e.target.value.slice(0, 20000))} rows={3} spellCheck={false}
+                      placeholder={"Type what your program reads, for example:\n1000\n450"}
+                      className="no-ring w-full resize-y rounded-xl border border-sep bg-card px-3 py-2 font-mono text-[12.5px] outline-none focus:border-[var(--label-3)]" />
+                    <p className="mt-1 text-[12px] text-label3">Run tests ignores this: the hidden tests use their own values.</p>
+                  </div>
+                )}
+                {!run ? <p className="font-sans text-sm text-label3">Press Run to see your program&apos;s output, or Run tests to check your work.</p>
                 : (
                   <div className="space-y-3">
                     {run.diagnostics.map((d, i) => (
@@ -745,9 +773,10 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                         ))}
                       </div>
                     )}
-                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && <ExpectedOutput expected={ch.sampleOutput} actual={run.stdout} />}
+                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && !stdin.trim() && <ExpectedOutput expected={ch.sampleOutput} actual={run.stdout} />}
                   </div>
                 )}
+              </>)}
             </div>}
           </div>
         </section>

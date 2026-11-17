@@ -13,6 +13,14 @@ final class RunSupport {
     private RunSupport() {}
 
     static final int OUT_CAP = 64 * 1024;
+    /** Most text a learner may feed a program through stdin. */
+    static final int STDIN_CAP = 20_000;
+
+    /** The stdin text a MAIN run may use, or null. */
+    static String stdinFor(CodeRunner.Mode mode, String stdin) {
+        if (mode != CodeRunner.Mode.MAIN || stdin == null || stdin.isEmpty()) return null;
+        return stdin.length() > STDIN_CAP ? stdin.substring(0, STDIN_CAP) : stdin;
+    }
     // javac "A.java:3: error: msg", g++ "a.cpp:3:5: error: msg", and our Python/JS syntax helpers (same shape)
     private static final Pattern DIAG = Pattern.compile("^([A-Za-z0-9_./-]+\\.[a-z]+):(\\d+)(?::\\d+)?: (error|warning|fatal error): (.*)$");
     // csc "Foo.cs(3,5): error CS1002: ; expected" (the file name may carry a path)
@@ -110,10 +118,19 @@ final class RunSupport {
             String file = mt.group(1).replaceFirst("^(\\./|src/)", "");
             String msg = mt.group(4);
             if (lang == Lang.JAVA) {
-                // javac prints the useful detail ("symbol: class Sting") on later lines
-                for (int j = i + 1; j < lines.length && j <= i + 4 && !DIAG.matcher(lines[j].strip()).matches(); j++) {
-                    String t = lines[j].trim();
-                    if (t.startsWith("symbol:")) msg += " (" + t.replaceAll("\\s+", " ") + ")";
+                // javac prints the useful detail on the lines after the source line and its caret: "symbol: class Sting",
+                // "return type void is not compatible with int", "required: int / found: String", "reason: ..."
+                int caret = -1;
+                for (int j = i + 1; j < lines.length && j <= i + 4 && !DIAG.matcher(lines[j].strip()).matches(); j++)
+                    if (lines[j].matches("^\\s*\\^\\s*$")) { caret = j; break; }
+                if (caret > 0) {
+                    List<String> details = new ArrayList<>();
+                    for (int j = caret + 1; j < lines.length && j <= caret + 6 && !DIAG.matcher(lines[j].strip()).matches(); j++) {
+                        String t = lines[j].trim().replaceAll("\\s+", " ");
+                        if (t.isEmpty() || t.matches("\\d+ errors?") || t.startsWith("location:")) { if (t.isEmpty() || t.matches("\\d+ errors?")) break; continue; }
+                        details.add(t);
+                    }
+                    if (!details.isEmpty()) msg += " (" + String.join("; ", details) + ")";
                 }
                 msg = friendlyJava(msg);
             }

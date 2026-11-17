@@ -23,6 +23,8 @@ export interface Challenge {
   testNames: string[]; sampleOutput: string;
   /** more tests that run only on Submit (edge cases): how many, never which */
   hiddenTests?: number;
+  /** files that are provided and read-only (the main file from SOLID on) */
+  lockedFiles?: string[];
   /** lessons to know before this challenge */
   requires?: Prereq[];
 }

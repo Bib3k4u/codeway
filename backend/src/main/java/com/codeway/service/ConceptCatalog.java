@@ -68,6 +68,16 @@ public class ConceptCatalog {
     public boolean isGuided(String conceptId) { return GUIDED.contains(conceptId); }
 
     /**
+     * From SOLID on, the main file is written for the learner (the demo of how the classes are used) and is read-only: the learner
+     * writes only the other classes, and the hidden tests don't depend on it. Until OOP is done the learner writes their own main.
+     * Guided design-pattern challenges ship their own working main and are left alone.
+     */
+    public boolean mainProvided(String conceptId) {
+        var c = find("java", conceptId);
+        return c.isPresent() && ("solid".equals(c.get().track()) || "lld".equals(c.get().track())) && !isGuided(conceptId);
+    }
+
+    /**
      * What a learner should already know before a concept's lesson and practice: concepts from earlier in the path.
      * Basic syntax (variables, methods, printing) is assumed everywhere. The lesson and challenge prompts use these lists,
      * and the app shows them as "Before you start" links.

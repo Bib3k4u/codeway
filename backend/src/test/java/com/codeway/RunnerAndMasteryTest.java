@@ -190,4 +190,15 @@ class RunnerAndMasteryTest {
         assertTrue(shown.allPassed());          // the hidden edge case that fails is not shown by "Run tests"
         assertEquals(6, all.total());           // Submit grades the whole result
     }
+
+    @Test void javacsExplanationLineIsKept() {
+        var r = runner.run(Map.of("Vehicle.java", "public interface Vehicle { void move(); int getMaxSpeed(); }",
+                "Bicycle.java", "public class Bicycle implements Vehicle {\n    public void move(){}\n    public void getMaxSpeed(){}\n}\n"), Map.of(), CodeRunner.Mode.CHECK);
+        assertFalse(r.compiled());
+        var all = r.diagnostics().stream().map(d -> d.message()).toList().toString();
+        assertTrue(all.contains("return type void is not compatible with int"), all);
+        var typo = runner.run(Map.of("Book.java", "public class Book { private Sting title; }"), Map.of(), CodeRunner.Mode.CHECK);
+        var msg = typo.diagnostics().get(0).message();
+        assertTrue(msg.contains("symbol: class Sting") && !msg.contains("location:"), msg);
+    }
 }

@@ -120,9 +120,10 @@ public class ChallengeService {
             try {
                 Lang lang = Lang.of(language);
                 String prompt = anchor.isPresent() ? GuidedPrompts.variant(lang, c, difficulty, scaffolding, avoid, anchor.get(), langRules(lang))
-                        : userPrompt(lang, c, difficulty, scaffolding, avoid, teachingRules(c, lesson));
+                        : userPrompt(lang, c, difficulty, scaffolding, avoid, teachingRules(c, lesson), catalog.mainProvided(concept));
                 String raw = ai.chat(ai.model(), system(lang), prompt + feedback, true);
                 Challenge ch = parse(raw, language, concept, difficulty, scaffolding);
+                if (anchor.isEmpty() && catalog.mainProvided(concept)) ch.mainLocked = true;
                 if (anchor.isPresent()) {
                     if (ch.guideJson == null) throw new IllegalStateException("missing guide");
                     ch.guideJson = GuidedPrompts.normalize(ch.guideJson, concept);   // our quiz options and answer key
@@ -251,6 +252,7 @@ public class ChallengeService {
                 String raw = ai.chat(ai.model(), system(lang), translatePrompt(src, lang) + feedback, true);
                 Challenge ch = parse(raw, language, src.concept, src.difficulty, src.scaffolding);
                 ch.expectedMinutes = src.expectedMinutes;
+                ch.mainLocked = src.mainLocked;
                 ch.guideJson = withSteps(src.guideJson, raw);   // quiz and reveal are language-neutral; the steps are re-worded for this language's names
                 String problem = validate(ch);
                 if (problem == null) {
@@ -309,6 +311,8 @@ public class ChallengeService {
                 - The starter must NOT pass the tests; the reference solution must pass all of them.
                 - descriptionMd keeps the same sections; its Example block must be exactly what the reference %5$s prints.
                 """.formatted(Lang.of(src.language).label, lang.label, Json.write(source), langRules(lang), lang.mainFile, lang.testFile)
+                + (!Boolean.TRUE.equals(src.mainLocked) ? "" : "\n- The main file " + lang.mainFile + " is provided to the learner and read-only: write it completely in starterFiles, with exactly the same text in referenceSolution, "
+                    + "and keep the same stubs (exact signature, dummy body) in starterFiles as the source has.\n")
                 + (src.guideJson == null ? "" : """
                 - Where the source uses a lambda or anonymous class for a single-method interface, write a small named class (or, in JavaScript, an object)
                   that has that method, in the starter's stubs, the reference and the tests alike, so every call site is written `thing.method(args)` and never
@@ -333,6 +337,12 @@ public class ChallengeService {
         Lang lang = Lang.of(ch.language);
         if (!tests.containsKey(lang.testFile)) return "tests must include " + lang.testFile;
         if (!ref.containsKey(lang.mainFile)) return "referenceSolution must include " + lang.mainFile;
+        if (Boolean.TRUE.equals(ch.mainLocked)) {
+            String sm = starter.get(lang.mainFile);
+            if (sm == null || sm.isBlank()) return "the provided " + lang.mainFile + " must be written out in starterFiles";
+            if (!sm.strip().equals(ref.get(lang.mainFile).strip()))
+                return lang.mainFile + " must be identical in starterFiles and referenceSolution: it is provided to the learner and read-only";
+        }
         for (String f : concat(starter, ref)) {
             if (!lang.fileName.matcher(f).matches()) return "bad file name " + f;
             if (f.equals(lang.testFile) || f.toLowerCase(Locale.ROOT).startsWith("check.")) return "learner files must not include " + f;
@@ -614,13 +624,23 @@ public class ChallengeService {
                 """.formatted(c.title(), c.summary(), design, checks);
     }
 
-    private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid, String teaching) {
+    private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid, String teaching, boolean mainProvided) {
         String concept = c.title();
         String scaffoldRule = switch (scaffolding) {
             case "HEAVY" -> "HEAVY scaffolding: the starter is almost complete. Most classes are written; the learner fills 2-3 clearly marked TODO gaps.";
             case "PARTIAL" -> "PARTIAL scaffolding: the starter has class skeletons, signatures and TODO comments; the learner writes the bodies and some members.";
-            default -> "BLANK scaffolding: the starter contains only a minimal main file (or nothing else). The description is a spec with exact class and method signatures; the learner writes everything.";
+            default -> mainProvided
+                    ? "BLANK scaffolding: the starter has only the problem code and an empty stub for each new type. The description is a spec with exact class and method signatures; the learner writes the bodies."
+                    : "BLANK scaffolding: the starter contains only a minimal main file (or nothing else). The description is a spec with exact class and method signatures; the learner writes everything.";
         };
+        String mainRule = mainProvided
+                ? "- %6$s is PROVIDED and read-only: write it completely in starterFiles, a working demo that uses the classes and prints clear lines, and put exactly the same text in\n"
+                + "  referenceSolution. The learner never edits it and the tests never use it. Prefer a stub in starterFiles (exact signature, dummy body such as return 0, null or an empty string)\n"
+                + "  for every class it uses, so the project compiles before the learner starts. Where the exercise is to CREATE a class or interface, %6$s may use it before it exists, but then\n"
+                + "  \"## Requirements\" must give its exact name, constructor and method signatures. All TODOs are in the other files.\n"
+                + "  In descriptionMd, say that %6$s is provided and must not be edited. Tests use several different values and, where the principle is about abstractions, a small fake class written in the test file."
+                : "- Include %6$s in starterFiles AND referenceSolution. In starterFiles it must be a working entry point\n"
+                + "  (with a TODO telling the learner what to demonstrate); in referenceSolution it creates a few objects and prints clear lines.";
         return """
                 Create ONE %1$s exercise teaching: %2$s
                 Difficulty: %3$d out of 5. %4$s
@@ -645,8 +665,7 @@ public class ChallengeService {
                 - Tests may only depend on the public API stated in descriptionMd, and must pass with referenceSolution.
                 - The starter must NOT pass the tests as given, and should run without syntax or compile errors when scaffolding is HEAVY or PARTIAL.
                 - Starter and referenceSolution must not include the check helper or %7$s.
-                - Include %6$s in starterFiles AND referenceSolution. In starterFiles it must be a working entry point
-                  (with a TODO telling the learner what to demonstrate); in referenceSolution it creates a few objects and prints clear lines.
+                %11$s
                 - descriptionMd must be detailed (at least 150 words) and use these Markdown sections, in this order:
                   "## Before you start", "## Goal" (the story and what the learner builds), "## Provided for you" (what the starter already contains),
                   "## Requirements" (numbered tasks, one per TODO, with exact %1$s signatures), "## New in this challenge" (only if rule 3 applies),
@@ -657,6 +676,6 @@ public class ChallengeService {
                 - Directly under the Example block add a short "Format:" bullet list that removes all guesswork about printing:
                   one item per printed line pattern, saying exactly what goes on each line, separators (e.g. ": " with one space),
                   number formatting (e.g. 2 decimal places), capitalisation, and that each item is on its own line.
-                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang), teaching);
+                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang), teaching, mainRule.formatted(lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile));
     }
 }

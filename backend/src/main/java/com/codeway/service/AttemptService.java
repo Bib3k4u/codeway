@@ -115,6 +115,7 @@ public class AttemptService {
                 Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
                 Map.entry("language", ch.language),
                 Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
+                Map.entry("lockedFiles", lockedFiles(ch)),
                 Map.entry("testNames", ChallengeService.visibleNames(ch)),
                 Map.entry("hiddenTests", ChallengeService.testNames(ch).size() - ChallengeService.visibleCount(ch)),
                 Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),
@@ -174,12 +175,28 @@ public class AttemptService {
         return out;
     }
 
+    // ---- the provided main file (SOLID and later): read-only, always the original ----
+    static List<String> lockedFiles(Challenge ch) {
+        return Boolean.TRUE.equals(ch.mainLocked) ? List.of(com.codeway.runner.Lang.of(ch.language).mainFile) : List.of();
+    }
+
+    /** The learner's files with the provided main file put back as it was handed out, so editing it (or deleting it) changes nothing. */
+    static Map<String, String> withLockedMain(Challenge ch, Map<String, String> files) {
+        var locked = lockedFiles(ch);
+        if (locked.isEmpty() || files == null) return files;
+        Map<String, String> out = new LinkedHashMap<>(files);
+        String original = Json.files(ch.starterFilesJson).get(locked.get(0));
+        if (original != null) out.put(locked.get(0), original);
+        return out;
+    }
+
     // ---- run (no mastery update) ----
-    public Map<String, Object> run(Long userId, Long attemptId, Map<String, String> files, String modeName) {
+    public Map<String, Object> run(Long userId, Long attemptId, Map<String, String> files, String modeName, String stdin) {
         Attempt a = owned(userId, attemptId);
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
+        files = withLockedMain(ch, files);
         boolean tests = "tests".equalsIgnoreCase(modeName);
-        RunResult r = runner.run(ch.language, files, tests ? Json.files(ch.testsJson) : Map.of(), tests ? CodeRunner.Mode.TESTS : CodeRunner.Mode.MAIN);
+        RunResult r = runner.run(ch.language, files, tests ? Json.files(ch.testsJson) : Map.of(), tests ? CodeRunner.Mode.TESTS : CodeRunner.Mode.MAIN, tests ? null : stdin);
         if (tests) { r = ChallengeService.onlyVisible(ch, ChallengeService.withAllTests(ch, r)); a.lastTestsJson = Json.write(r.tests()); }
         a.runs++;
         if (!r.compiled()) a.compileErrors++;
@@ -210,6 +227,7 @@ public class AttemptService {
         Long prev = lastCheck.put(userId, now);
         if (prev != null && now - prev < 800_000_000L) return skipped;
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
+        files = withLockedMain(ch, files);
         RunResult r = runner.run(ch.language, files, Map.of(), CodeRunner.Mode.CHECK);
         if (RunResult.BUSY.equals(r.stderr())) return skipped;
         return Map.of("compiled", r.compiled(), "diagnostics", r.diagnostics(), "skipped", false);
@@ -225,6 +243,7 @@ public class AttemptService {
         Attempt a = owned(userId, attemptId);
         if (a.submittedAt != null) throw new ResponseStatusException(HttpStatus.CONFLICT, "This attempt was already submitted");
         Challenge ch = challenges.findById(a.challengeId).orElseThrow();
+        files = withLockedMain(ch, files);
         RunResult r = ChallengeService.withAllTests(ch, runner.run(ch.language, files, Json.files(ch.testsJson), CodeRunner.Mode.TESTS));
 
         int total = Math.max(ChallengeService.testNames(ch).size(), r.total());
@@ -705,6 +724,7 @@ public class AttemptService {
                 Map.entry("difficulty", ch.difficulty), Map.entry("scaffolding", ch.scaffolding), Map.entry("expectedMinutes", ch.expectedMinutes),
                 Map.entry("language", ch.language), Map.entry("concept", ch.concept),
                 Map.entry("files", ChallengeService.starterWithMain(ch.language, Json.files(ch.starterFilesJson))),
+                Map.entry("lockedFiles", lockedFiles(ch)),
                 Map.entry("testNames", ChallengeService.visibleNames(ch)),
                 Map.entry("hiddenTests", ChallengeService.testNames(ch).size() - ChallengeService.visibleCount(ch)),
                 Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),

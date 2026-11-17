@@ -22,7 +22,7 @@ public class LocalRunner implements CodeRunner {
     private final String javaHome = System.getProperty("java.home");
 
     @Override
-    public RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode) {
+    public RunResult run(String language, Map<String, String> files, Map<String, String> tests, Mode mode, String stdin) {
         long t0 = System.currentTimeMillis();
         Lang lang = Lang.of(language);
         Path dir = null;
@@ -47,7 +47,10 @@ public class LocalRunner implements CodeRunner {
             if (!Files.exists(dir.resolve(p.plan().entry())))
                 return new RunResult(true, diags, "", p.plan().noEntryMsg(), List.of(), false, 1, System.currentTimeMillis() - t0);
 
-            Proc r = exec(argv(p.plan().run(), dir), src, p.plan().run().env(), RUN_TIMEOUT_S);
+            String input = RunSupport.stdinFor(mode, stdin);
+            Path inFile = null;
+            if (input != null) { inFile = dir.resolve("stdin.txt"); Files.writeString(inFile, input, java.nio.charset.StandardCharsets.UTF_8); }
+            Proc r = exec(argv(p.plan().run(), dir), src, p.plan().run().env(), RUN_TIMEOUT_S, inFile);
             // macOS has two spellings of the temp dir (/private/var/... and /var/...): strip the longer one first
             String stderr = r.stderr.replace(prefix, "").replace(src.toAbsolutePath() + File.separator, "");
             return RunSupport.result(lang, p, mode, diags, r.stdout, stderr, r.timedOut, r.exit, RUN_TIMEOUT_S, prefix, t0);
@@ -70,12 +73,17 @@ public class LocalRunner implements CodeRunner {
     record Proc(int exit, String stdout, String stderr, boolean timedOut) {}
 
     static Proc exec(List<String> cmd, Path cwd, Map<String, String> env, long timeoutSec) throws IOException, InterruptedException {
+        return exec(cmd, cwd, env, timeoutSec, null);
+    }
+
+    /** @param stdin file the process reads as standard input; null means nothing (/dev/null) */
+    static Proc exec(List<String> cmd, Path cwd, Map<String, String> env, long timeoutSec, Path stdin) throws IOException, InterruptedException {
         Path so = Files.createTempFile("cw-out", ".txt");
         Path se = Files.createTempFile("cw-err", ".txt");
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd.toFile())
                     .redirectOutput(so.toFile()).redirectError(se.toFile())
-                    .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+                    .redirectInput(ProcessBuilder.Redirect.from(stdin != null ? stdin.toFile() : new File("/dev/null")));
             pb.environment().keySet().removeIf(k -> k.contains("KEY") || k.contains("SECRET") || k.contains("PASSWORD") || k.contains("TOKEN")
                     || k.startsWith("DB_") || k.startsWith("AI_") || k.startsWith("PYTHON") || k.startsWith("NODE_"));
             pb.environment().putAll(env);

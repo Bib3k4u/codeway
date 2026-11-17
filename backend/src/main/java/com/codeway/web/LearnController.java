@@ -12,7 +12,7 @@ import java.util.*;
 @RequestMapping("/api")
 public class LearnController {
     public record NextReq(String language, String concept) {}
-    public record RunReq(Long attemptId, Map<String, String> files, String mode) {}
+    public record RunReq(Long attemptId, Map<String, String> files, String mode, String stdin) {}
     public record SubmitReq(Map<String, String> files, Integer confidence, Boolean finish) {}
     public record HintReq(Map<String, String> files, String failures) {}
     public record DraftReq(Map<String, String> files) {}
@@ -92,7 +92,7 @@ public class LearnController {
 
     @PostMapping("/run")
     public Map<String, Object> run(HttpServletRequest req, @RequestBody RunReq b) {
-        return attempts.run(uid(req), b.attemptId(), b.files(), b.mode());
+        return attempts.run(uid(req), b.attemptId(), b.files(), b.mode(), b.stdin());
     }
 
     /** Compile-only check while the learner types: error markers in the editor. Not a run. */
