@@ -181,9 +181,8 @@ public class ChallengeService {
                 7. Everything the tests check is stated in descriptionMd: exact output text, formats, method names, parameters and what is thrown. Nothing is left to guess.
                 8. The learner sees the NAME of every test (never its code), so each name says in plain words what is checked, e.g. "A Dog greets with Woof!",
                    never "Test 1". A name must not reveal more than the description already says.
-                9. Order the tests from plain to tricky and write at least 6. The first half are the everyday cases the learner sees and can run while working;
-                   the rest are hidden until the learner submits: edge cases (empty or zero values, boundaries, repeated calls, invalid input) that follow from
-                   the description. Everything a hidden test checks must still be stated in descriptionMd.
+                9. Keep the test file simple and short: each test is a few lines and uses only classes and methods the description names. Put the plain, everyday
+                   cases first and the trickier ones (edge cases that follow from the description) last: the learner sees the first half and the rest run on submit.
                 """.formatted(lesson == null ? "" : " (given below)", note != null && note.avoid() != null ? " Do not use these, they come later: " + note.avoid() + "." : "",
                 later.isBlank() ? "" : " Not yet taught: " + later + ".", before.isBlank() ? "basic syntax only" : before));
         if (lesson != null) sb.append("\n--- LESSON THE LEARNER HAS JUST READ ---\n").append(lesson.length() > 7000 ? lesson.substring(0, 7000) : lesson).append("\n--- END OF LESSON ---\n");
