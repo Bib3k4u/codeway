@@ -200,7 +200,7 @@ function Legend() {
       <li className="flex items-center gap-2"><span className="text-[9px] font-bold tracking-wide">NEW</span>Not started</li>
       <li className="flex items-center gap-2"><span aria-hidden className="relative inline-block h-4 w-3 overflow-hidden rounded-[3px]" style={{ background: COLORS[6] }}><i className="absolute inset-y-0 left-0 w-[3px] bg-black/55" /></span>Started: a strip on the spine fills up with your progress</li>
       <li className="flex items-center gap-2"><span className="inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2 py-px text-[10.5px] font-bold text-white"><Check size={11} strokeWidth={3} aria-hidden />Mastered</span>fully coloured</li>
-      <li className="flex items-center gap-2"><span aria-hidden className="inline-flex gap-[3px]"><i className="h-1.5 w-1.5 rounded-full bg-label2" /><i className="h-1.5 w-1.5 rounded-full bg-label2" /><i className="h-1.5 w-1.5 rounded-full border border-label3" /></span>Dots: your streak of clean passes</li>
+      <li className="flex items-center gap-2"><span aria-hidden className="inline-flex gap-[3px]"><i className="h-1.5 w-1.5 rounded-full bg-label2" /><i className="h-1.5 w-1.5 rounded-full bg-label2" /><i className="h-1.5 w-1.5 rounded-full border border-label3" /></span>Dots: your clean passes in a row (no hints)</li>
     </ul>
   );
 }
@@ -282,7 +282,7 @@ function BookCard({ c, order, total, color, language, out, history, requires, on
               : <>
                 {c.mastered && <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>}
                 {c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
-                  : !c.mastered && (c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Streak {c.streak}/{c.streakGoal ?? 3}</span> : <span className="chip">Not started</span>)}
+                  : !c.mastered && (c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Clean passes {c.streak}/{c.streakGoal ?? 3}</span> : <span className="chip">Not started</span>)}
               </>}
           </div>
           {requires.length > 0 && (
@@ -303,7 +303,7 @@ function BookCard({ c, order, total, color, language, out, history, requires, on
               <dl className="grid flex-1 grid-cols-3 gap-2 text-center">
                 <div><dt className="eyebrow !tracking-wider" title="How close you are to mastery, by streak or score, whichever is closer">To mastery</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{pct}%</dd></div>
                 <div><dt className="eyebrow !tracking-wider">Tries</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.attempts}</dd></div>
-                <div><dt className="eyebrow !tracking-wider">Streak</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.streak}/{c.streakGoal ?? 3}</dd></div>
+                <div><dt className="eyebrow !tracking-wider" title="Passes in a row with no hints and no resubmits">Clean passes</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.streak}/{c.streakGoal ?? 3}</dd></div>
               </dl>
             </div>
           ) : (

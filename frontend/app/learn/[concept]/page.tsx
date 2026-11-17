@@ -141,7 +141,7 @@ function LessonView({ concept, lang, onLang }: { concept: string; lang: LangId; 
               <div>
                 <p className="text-[13px] text-label3">Your mastery</p>
                 <p className="text-[16px] font-semibold tracking-tight">{row?.mastered ? "Mastered" : row?.inProgress || (row && row.attempts > 0) ? "In progress" : "Not started"}</p>
-                {row && <p className="text-xs text-label3">Streak {row.streak} of 3</p>}
+                {row && <p className="text-xs text-label3">Clean passes {row.streak} of 3</p>}
               </div>
             </div>
             <p className="mb-4 flex items-start gap-2 text-[13px] leading-snug text-label2"><Flame size={14} className="mt-0.5 shrink-0 text-accent" />Pass 3 challenges in a row, at your level, without hints.</p>

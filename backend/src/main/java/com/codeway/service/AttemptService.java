@@ -106,7 +106,14 @@ public class AttemptService {
 
     private static Instant lastActive(Attempt a) { return a.lastActiveAt != null ? a.lastActiveAt : a.startedAt; }
 
+    /** Starts making the challenge the learner is most likely to want next, so it is waiting when they get there. */
+    private void prepareNext(Long userId, Challenge ch, double score, boolean mastered) {
+        if (mastered) return;
+        challengeService.prefetch(userId, ch.language, ch.concept, MasteryService.targetDifficulty(score), MasteryService.scaffolding(score));
+    }
+
     private Map<String, Object> startView(Attempt a, Challenge ch, ConceptMastery m, boolean resumed) {
+        if (!a.isPractice()) prepareNext(a.userId, ch, MasteryService.scoreAfterCleanPass(m.score, ch.difficulty), m.mastered);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("attemptId", a.id);
         out.put("resumed", resumed);
@@ -289,6 +296,7 @@ public class AttemptService {
         var o = mastery.apply(userId, ch.language, ch.concept, ch.difficulty, signals, a.isPractice());
         a.performance = o.performance(); a.scoreAfter = o.scoreAfter();
         attempts.save(a);
+        if (!a.isPractice()) prepareNext(userId, ch, o.scoreAfter(), o.mastered());   // the real score is now known: make sure that one is ready too
         logEvent(a.id, "submit", "{\"passed\":" + passed + ",\"total\":" + total + "}");
 
         Map<String, Object> out = new LinkedHashMap<>(runView(r, a, ch));

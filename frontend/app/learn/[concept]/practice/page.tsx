@@ -15,7 +15,7 @@ import { useConcepts } from "@/lib/concepts";
 import LangMenu from "@/components/LangMenu";
 import ResetMenu from "@/components/ResetMenu";
 import { usePref } from "@/lib/prefs";
-import { api, ApiError, saveDraftOnExit, type AttemptDetail, type Diagnostic, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
+import { api, ApiError, saveDraftOnExit, startChallenge, type AttemptDetail, type Diagnostic, type Files, type Guide, type Hint, type HintQuota, type PatternReveal, type QuizState, type RunResp, type StartResp, type SubmitResp } from "@/lib/api";
 import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel, { STEP_MS } from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
@@ -55,6 +55,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   const { refresh: refreshConcepts } = useConcepts();
   const [start, setStart] = useState<StartResp | null>(null);
   const [error, setError] = useState("");
+  const [waited, setWaited] = useState(0);        // seconds spent waiting for a new challenge to be made
   const [files, setFiles] = useState<Files>({});
   // The editor can be split into up to three columns, each with its own open files; `drag` is the file being dragged right now.
   const [groups, setGroups] = useState<Group[]>([{ id: 1, open: [], active: "" }]);
@@ -247,7 +248,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
         mastery: { score: 0, streak: 0, mastered: false, streakGoal: 3, attempts: 0 },
         };
       })
-      : redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : api<StartResp>("/challenges/next", { language: lang, concept });
+      : redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : startChallenge(lang, concept, setWaited, () => started.current !== startKey);
     req
       .then((r) => {
         const initial = r.draft ?? r.challenge.files;
@@ -426,7 +427,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
 
   const endParty = useCallback(() => setParty(false), []);
   const diagnostics = live ?? run?.diagnostics ?? [];
-  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setQuiz(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setQuiz(null); setError(""); setWaited(0); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
   const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -447,7 +448,10 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
           <XCircle className="mx-auto mb-3 text-bad" size={36} />
           <h1 className="mb-2 text-xl font-semibold">Couldn&apos;t start a challenge</h1>
           <p className="mb-6 text-sm text-label2">{error}</p>
-          <Link href="/dashboard" className="btn btn-primary">Back to dashboard</Link>
+          <div className="flex justify-center gap-2.5">
+            <button className="btn btn-primary" onClick={nextChallenge}><RotateCcw size={15} />Try again</button>
+            <Link href="/dashboard" className="btn btn-secondary">Back to dashboard</Link>
+          </div>
         </div>
       </AppShell>
     );
@@ -459,7 +463,10 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
         <div className="mx-auto mt-24 max-w-sm text-center rise">
           <Loader2 className="mx-auto mb-5 animate-spin text-accent" size={30} />
           <h1 className="mb-1 text-xl font-semibold tracking-tight">Preparing your challenge</h1>
-          <p className="text-sm text-label2">Choosing one that matches your level. Generated challenges are tested before you see them, so this can take a moment.</p>
+          <p className="text-sm text-label2">
+            {waited < 6 ? "Choosing one that matches your level." : "Writing a new challenge for your level and testing it before you see it. This usually takes under a minute."}
+          </p>
+          {waited >= 6 && <p className="mt-2 text-xs tabular-nums text-label3">{waited}s</p>}
         </div>
       </AppShell>
     );
@@ -547,7 +554,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                 )}
               </>
             ) : (
-              hints.length === 0 ? (
+              hints.length === 0 && busy !== "hint" ? (
                 <div className="mt-10 text-center text-sm text-label2">
                   <Lightbulb className="mx-auto mb-3 text-warn" size={28} />
                   <p className="mb-1 font-medium text-label">Try first, hint second.</p>
@@ -568,6 +575,11 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                       ))}
                     </li>
                   ))}
+                  {busy === "hint" && (
+                    <li role="status" className="flex items-center gap-2.5 rounded-xl border border-dashed border-sep p-4 text-[13.5px] text-label2">
+                      <Loader2 size={15} className="animate-spin text-accent" />Reading your code and writing a hint. A few seconds…
+                    </li>
+                  )}
                 </ol>
               )
             )}
@@ -793,10 +805,10 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
             <p className="mt-2 text-[14.5px] leading-relaxed text-label2">
               {start.practice
                 ? "This is practice, so your mastery won't change. "
-                : hintLevel === 0 ? "This attempt will earn a little less mastery (about 8% less), and your clean-streak starts over. "
-                : hintLevel === 1 ? "This attempt will earn noticeably less mastery (about 20% less), and your clean-streak starts over. "
-                : hintLevel === 2 ? "This attempt will earn much less mastery (about 40% less), and your clean-streak starts over. "
-                : "This shows the complete answer. The attempt can earn at most a fifth of its mastery, and your clean-streak starts over. "}
+                : hintLevel === 0 ? "This attempt will earn a little less mastery (about 8% less), and your clean-pass count starts over. "
+                : hintLevel === 1 ? "This attempt will earn noticeably less mastery (about 20% less), and your clean-pass count starts over. "
+                : hintLevel === 2 ? "This attempt will earn much less mastery (about 40% less), and your clean-pass count starts over. "
+                : "This shows the complete answer. The attempt can earn at most a fifth of its mastery, and your clean-pass count starts over. "}
               {hintLevel === 0 ? "You get a nudge, not the answer." : hintLevel === 1 ? "You get the key idea." : hintLevel === 2 ? "You get part of the code." : ""}
             </p>
             {hintQuota && <p className="mt-2 text-[13px] text-label3">It also uses one of your {hintQuota.limit} hints this hour ({hintQuota.left} left).</p>}
@@ -955,9 +967,10 @@ function ResultSheet({ r, concept, lang, onNext, onHome, onClose }: { r: SubmitR
         <div className="mb-5 flex items-center justify-center gap-6 rounded-xl bg-card2 p-5 border border-sep">
           <Ring value={shown} size={92} stroke={9} mastered={r.mastered} />
           <div>
-            <p className="text-[13px] text-label2">Mastery</p>
+            <p className="text-[13px] text-label2">Mastery change</p>
             <p className={`text-[28px] font-bold tabular-nums tracking-tight ${up ? "text-ok" : "text-bad"}`}>{up ? "+" : ""}{Math.round(r.delta * 100)}</p>
-            <p className="text-xs text-label3">{r.practice ? "Practice: mastery unchanged" : `Streak ${r.streak}/${r.streakGoal}`}</p>
+            <p className="text-xs text-label3">{r.practice ? "Practice: mastery unchanged" : `Now ${Math.round(r.scoreAfter * 100)} of 100`}</p>
+            {!r.practice && <p className="text-xs text-label3" title="Passes in a row with no hints and no resubmits. Three in a row masters the concept.">{`Clean passes ${r.streak}/${r.streakGoal}`}</p>}
             {r.calibration && r.calibration !== "unrated" && <span className="chip mt-1.5 capitalize" title="Read from how you worked: first test run, number of runs, pace and help used">{r.calibration}</span>}
           </div>
         </div>

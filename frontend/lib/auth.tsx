@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setLanguage = useCallback((language: LangId) => {
     recordVisit(language);
-    setUser((u) => (u && u.preferredLanguage !== language ? { ...u, preferredLanguage: language } : u));
+    setUser((u) => (u && (u.preferredLanguage !== language || u.languageChosen === false) ? { ...u, preferredLanguage: language, languageChosen: true } : u));
   }, []);
 
   const setDisplayName = useCallback(async (name: string) => {

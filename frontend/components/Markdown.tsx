@@ -9,6 +9,11 @@ import { cleanHeading, slugify, textOf, type TocItem } from "@/lib/toc";
  * With `toc`, headings get anchor ids and their outline number, and h1 is dropped (the page has its own title).
  * `compact` uses the smaller reading size for side panels (challenge brief, hints).
  */
+/** Challenges written earlier sometimes have "see ## Main.java" in a sentence: a heading marker there would show as raw text. */
+function tidy(md: string): string {
+  return md.replace(/(?<=\S[ \t])#{2,6}[ \t]+([A-Za-z0-9_]+\.[A-Za-z]+)/g, "`$1`");
+}
+
 export default function Markdown({ children, toc, compact = false }: { children: string; toc?: TocItem[]; compact?: boolean }) {
   const components: Components = {
     code({ className, children: c }) {
@@ -31,5 +36,5 @@ export default function Markdown({ children, toc, compact = false }: { children:
     components.h2 = heading("h2");
     components.h3 = heading("h3");
   }
-  return <div className={`prose-apple ${compact ? "prose-compact" : ""}`}><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{children}</ReactMarkdown></div>;
+  return <div className={`prose-apple ${compact ? "prose-compact" : ""}`}><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{compact ? tidy(children) : children}</ReactMarkdown></div>;
 }

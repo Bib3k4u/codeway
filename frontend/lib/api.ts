@@ -2,7 +2,7 @@ import { supabase } from "./supabase";
 
 export type Files = Record<string, string>;
 
-export interface User { id: number; email: string; displayName: string; preferredLanguage?: string; avatarUrl?: string }
+export interface User { id: number; email: string; displayName: string; preferredLanguage?: string; avatarUrl?: string; languageChosen?: boolean }
 export interface Track { id: string; order: number; title: string; summary: string; practice: boolean }
 export interface ConceptRow {
   id: string; title: string; summary: string; symbol: string; track: string; group?: string;
@@ -128,6 +128,31 @@ export async function api<T>(path: string, body?: unknown, method?: string): Pro
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
   return data as T;
+}
+
+/**
+ * Starts (or resumes) a challenge. A new one can take a minute to write and test, so the server answers "preparing" after a short
+ * wait and this asks again until it is ready: no single request runs long enough for a proxy or the browser to cut it off.
+ */
+export async function startChallenge(language: string, concept: string, onWait?: (seconds: number) => void, cancelled?: () => boolean): Promise<StartResp> {
+  const t0 = Date.now();
+  let hiccups = 0;
+  for (;;) {
+    try {
+      const r = await api<StartResp & { preparing?: boolean }>("/challenges/next", { language, concept });
+      if (!r.preparing) return r;
+      hiccups = 0;
+    } catch (e) {
+      // a dropped connection or a proxy timeout is not the end of the job: it carries on in the background
+      const status = e instanceof ApiError ? e.status : 0;
+      if (![0, 502, 504].includes(status) || ++hiccups > 4) throw e;
+    }
+    if (cancelled?.()) throw new ApiError("Cancelled", 0);
+    const waited = Math.round((Date.now() - t0) / 1000);
+    if (waited > 240) throw new ApiError("This is taking longer than usual. Please try again.", 504);
+    onWait?.(waited);
+    await new Promise((done) => setTimeout(done, 1500));
+  }
 }
 
 /** Best-effort save that survives the tab closing. */

@@ -9,6 +9,7 @@ import { langLabel, type LangId } from "@/lib/lang";
 import { useTracks } from "@/lib/tracks";
 import { useAuth } from "@/lib/auth";
 import { useStats } from "@/lib/stats";
+import LanguagePicker from "@/components/LanguagePicker";
 
 function Section({ title, meta, children, className = "" }: { title: string; meta?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -102,6 +103,7 @@ export default function Dashboard() {
         {!rows || !tracks.length ? <div className="skeleton h-[420px]" /> : <BookPath tracks={tracks} rows={rows} language={language} />}
       </Section>
 
+      <LanguagePicker />
     </AppShell>
   );
 }

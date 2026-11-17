@@ -46,6 +46,17 @@ public class AiQuota {
         return true;
     }
 
+    /**
+     * Whether there is room to spend AI calls ahead of need (preparing the next challenge): a generation costs several calls, so
+     * background work stops while the learner or the app is close to a cap and what is left is kept for hints and live requests.
+     */
+    public synchronized boolean hasHeadroom(Long userId, int calls) {
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+        if (!today.equals(day)) return true;
+        if (global > 0 && globalUsed + calls > global * 0.8) return false;
+        return userId == null || perUser <= 0 || used.getOrDefault(userId, 0) + calls <= perUser;
+    }
+
     public synchronized Map<String, Integer> snapshot(Long userId) {
         return Map.of("userUsed", userId == null ? 0 : used.getOrDefault(userId, 0), "userLimit", perUser,
                 "globalUsed", globalUsed, "globalLimit", global);

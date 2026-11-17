@@ -7,4 +7,11 @@ public final class CurrentUser {
     public static Long get() { return ID.get(); }
     static void set(Long id) { ID.set(id); }
     static void clear() { ID.remove(); }
+
+    /** Runs {@code job} on another thread as this user (so AI calls are counted against them), then restores the thread. */
+    public static <T> T as(Long id, java.util.function.Supplier<T> job) {
+        Long before = ID.get();
+        if (id == null) ID.remove(); else ID.set(id);
+        try { return job.get(); } finally { if (before == null) ID.remove(); else ID.set(before); }
+    }
 }

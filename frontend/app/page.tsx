@@ -16,10 +16,10 @@ const NAV = [
 
 /** An illustrative run through one concept: what happened, and what the tutor did next. */
 const RUN = [
-  { n: 1, title: "Shape Parade", setup: "Guided · level 1", what: "5/5 tests on the first run, felt confident, no hints", next: "Next one gets harder and less scaffolded" },
-  { n: 2, title: "Payment Router", setup: "Skeleton · level 2", what: "Passed after 6 runs and 3 compile errors, opened 2 hints", next: "Stays at level 2, streak resets" },
-  { n: 3, title: "Notification Hub", setup: "Skeleton · level 2", what: "Passed on the second run, no hints", next: "Streak 1 of 3, same level" },
-  { n: 4, title: "Plugin Loader", setup: "From scratch · level 3", what: "Passed, no hints, quicker than expected", next: "Streak 2 of 3, moves up" },
+  { n: 1, title: "Shape Parade", setup: "Guided · level 1", what: "5/5 tests on the first run, no hints", next: "Next one gets harder and less scaffolded" },
+  { n: 2, title: "Payment Router", setup: "Skeleton · level 2", what: "Passed after 6 runs and 3 compile errors, opened 2 hints", next: "Stays at level 2, clean-pass count resets" },
+  { n: 3, title: "Notification Hub", setup: "Skeleton · level 2", what: "Passed on the second run, no hints", next: "Clean pass 1 of 3, same level" },
+  { n: 4, title: "Plugin Loader", setup: "From scratch · level 3", what: "Passed, no hints, quicker than expected", next: "Clean pass 2 of 3, moves up" },
 ];
 
 const TRACKS = [
@@ -138,8 +138,8 @@ function HomePage() {
           <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div>
               <Heading title="The next challenge depends on how you did on this one.">
-                After every submission Codeway weighs your first-run results, runs and compile errors, time taken, hints opened,
-                and how confident you said you were.
+                After every submission Codeway weighs your first-run results, runs and compile errors, time taken and hints opened.
+                Nobody asks you to rate yourself: it is read from how you worked.
               </Heading>
               <p className="mt-4 max-w-[600px] text-[17px] leading-relaxed text-label2">
                 That sets the difficulty and how much code you start with, from mostly written, to just the signatures, to a blank

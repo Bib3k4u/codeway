@@ -15,6 +15,11 @@ public class ApiExceptionHandler {
     ResponseEntity<Map<String, String>> status(ResponseStatusException e) {
         return ResponseEntity.status(e.getStatusCode()).body(Map.of("error", String.valueOf(e.getReason())));
     }
+    /** A challenge is still being made: 202 tells the browser to ask again (the same job is joined). */
+    @ExceptionHandler(com.codeway.service.ChallengeService.Preparing.class)
+    ResponseEntity<Map<String, Object>> preparing() {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("preparing", true));
+    }
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<Map<String, String>> invalid(MethodArgumentNotValidException e) {
         return ResponseEntity.badRequest().body(Map.of("error", "Please check your email and use a password of at least 6 characters"));

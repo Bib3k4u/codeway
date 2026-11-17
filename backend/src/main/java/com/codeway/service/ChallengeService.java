@@ -1,6 +1,7 @@
 package com.codeway.service;
 
 import com.codeway.ai.AiClient;
+import com.codeway.auth.CurrentUser;
 import com.codeway.domain.*;
 import com.codeway.repo.*;
 import com.codeway.runner.*;
@@ -9,12 +10,24 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class ChallengeService {
-    private static final int MAX_GENERATION_TRIES = 3;
+    private static final int MAX_GENERATION_TRIES = 4;
+    /** How long one request waits for a challenge being made before telling the browser to ask again (long-polling). */
+    static final long PICK_WAIT_MS = 20_000;
+    /** After a generation fails, the same kind is not retried for this long (stops a stampede of retries on a struggling model). */
+    private static final long COOLDOWN_MS = 30_000;
+    /** At most this many exercises are made at once (each takes AI calls and sandbox runs); the rest wait their turn. */
+    private static final int GENERATION_THREADS = 2;
+    /** Waiting this long or more in the queue, a learner is served a stored challenge instead of waiting for a fresh one. */
+    private static final int BACKLOG_LIMIT = 6;
+    /** AI calls one generation can cost (one to write, one to review, per try), used to decide whether to prepare ahead. */
+    private static final int PREFETCH_CALLS = 10;
 
     private final ChallengeRepo challenges;
     private final AttemptRepo attempts;
@@ -22,6 +35,18 @@ public class ChallengeService {
     private final AiClient ai;
     private final ConceptCatalog catalog;
     private final LessonService lessons;
+
+    /** Generation runs off the request threads: bounded, de-duplicated by kind of challenge, and it carries on if the browser goes away. */
+    private final ThreadPoolExecutor genPool = new ThreadPoolExecutor(GENERATION_THREADS, GENERATION_THREADS, 0L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(60), r -> { Thread t = new Thread(r, "challenge-gen"); t.setDaemon(true); return t; });
+    private final ConcurrentHashMap<String, CompletableFuture<Challenge>> inflight = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> failedAt = new ConcurrentHashMap<>();
+    private final Set<String> preparing = ConcurrentHashMap.newKeySet();
+
+    /** Thrown while a challenge is still being made: the browser gets "202, ask again" and the same job is joined. */
+    public static class Preparing extends RuntimeException {
+        public Preparing() { super("A challenge is being prepared", null, false, false); }
+    }
 
     public ChallengeService(ChallengeRepo challenges, AttemptRepo attempts, CodeRunner runner, AiClient ai, ConceptCatalog catalog, LessonService lessons) {
         this.challenges = challenges; this.attempts = attempts; this.runner = runner; this.ai = ai; this.catalog = catalog; this.lessons = lessons;
@@ -87,8 +112,9 @@ public class ChallengeService {
         var exact = unseen.stream().filter(c -> c.difficulty == difficulty && c.scaffolding.equals(scaffolding)).findFirst();
         if (exact.isPresent()) return exact.get();
 
-        if (ai.isConfigured() && !(guided && bank.isEmpty())) {
-            Challenge g = generate(language, concept, difficulty, scaffolding, bank);
+        boolean busy = genPool.getQueue().size() >= BACKLOG_LIMIT && !unseen.isEmpty();   // a long queue: don't make learners wait behind it
+        if (ai.isConfigured() && !(guided && bank.isEmpty()) && !busy) {
+            Challenge g = made(userId, language, concept, difficulty, scaffolding, PICK_WAIT_MS);
             if (g != null) return g;
         }
 
@@ -99,7 +125,78 @@ public class ChallengeService {
         return bank.stream()
                 .min(Comparator.comparingLong((Challenge c) -> lastSeen.getOrDefault(c.id, 0L)).thenComparing(nearest))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "No challenges are ready for this concept yet. Please try again later, or pick another concept."));
+                        "We couldn't prepare a challenge just now. Please try again in a minute, or pick another concept."));
+    }
+
+    // ---- making challenges in the background ----
+    private static String key(String language, String concept, int difficulty, String scaffolding) {
+        return language + "|" + concept + "|" + difficulty + "|" + scaffolding;
+    }
+
+    private boolean recentlyFailed(String key) {
+        Long t = failedAt.get(key);
+        return t != null && System.currentTimeMillis() - t < COOLDOWN_MS;
+    }
+
+    /**
+     * Runs {@code job} on the generation pool, once per {@code key} however many learners ask for the same kind of challenge at the
+     * same time. {@code waitMs} is how long to wait for it (0 = don't). Throws {@link Preparing} if it is still going; null if it
+     * failed (or failed just now, see the cooldown).
+     */
+    Challenge shared(String key, Long userId, Supplier<Challenge> job, long waitMs) {
+        CompletableFuture<Challenge> f = inflight.get(key);
+        if (f == null) {
+            if (recentlyFailed(key)) return null;
+            f = inflight.computeIfAbsent(key, k -> {
+                CompletableFuture<Challenge> cf = new CompletableFuture<>();
+                try {
+                    genPool.execute(() -> {
+                        Challenge made = null;
+                        try { made = CurrentUser.as(userId, job); }
+                        catch (Throwable t) { System.err.println("[challenge] job " + k + " crashed: " + t); }
+                        if (made == null) failedAt.put(k, System.currentTimeMillis()); else failedAt.remove(k);
+                        cf.complete(made);
+                        inflight.remove(k, cf);
+                    });
+                } catch (RejectedExecutionException e) { cf.complete(null); }   // the queue is full: the caller falls back to the bank
+                return cf;
+            });
+            if (f.isDone()) inflight.remove(key, f);
+        }
+        if (waitMs <= 0) return null;
+        try { return f.get(waitMs, TimeUnit.MILLISECONDS); }
+        catch (TimeoutException e) { throw new Preparing(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); return null; }
+        catch (ExecutionException e) { return null; }
+    }
+
+    private Challenge made(Long userId, String language, String concept, int difficulty, String scaffolding, long waitMs) {
+        return shared(key(language, concept, difficulty, scaffolding), userId,
+                () -> generate(language, concept, difficulty, scaffolding, bank(language, concept)), waitMs);
+    }
+
+    /**
+     * Gets the next challenge ready while the learner works on this one, so "Next" is instant instead of a minute of waiting.
+     * Does nothing when one is already stored for them, when the same kind is already being made, when the AI allowance is running
+     * low or the queue is long. Never throws: it is an optimisation, not a promise. Design-pattern (guided) concepts are skipped:
+     * their next exercise depends on the anchor scenario the learner has not finished yet.
+     */
+    public void prefetch(Long userId, String language, String concept, int difficulty, String scaffolding) {
+        try {
+            if (ai == null || attempts == null || !ai.isConfigured() || catalog.isGuided(concept) || !catalog.practiceOpen(language, concept)) return;
+            String k = key(language, concept, difficulty, scaffolding);
+            if (inflight.containsKey(k) || recentlyFailed(k) || genPool.getQueue().size() >= 3) return;
+            if (!ai.hasHeadroom(userId, PREFETCH_CALLS)) return;
+            if (!preparing.add(userId + "|" + k)) return;
+            try {
+                Set<Long> seen = new HashSet<>();
+                for (Attempt a : attempts.findByUserId(userId)) seen.add(a.challengeId);
+                boolean stored = bank(language, concept).stream().anyMatch(c -> !seen.contains(c.id) && c.difficulty == difficulty && c.scaffolding.equals(scaffolding));
+                if (!stored) made(userId, language, concept, difficulty, scaffolding, 0);
+            } finally { preparing.remove(userId + "|" + k); }
+        } catch (Exception e) {
+            System.err.println("[challenge] prefetch skipped: " + e.getMessage());
+        }
     }
 
     /** The hand-written Java scenario a guided concept's variants are modelled on. */
@@ -116,6 +213,7 @@ public class ChallengeService {
         // The learner reads this lesson before practising, so the exercise is written from it, not around it.
         String lesson = anchor.isPresent() ? null : lessonFor(language, concept);
         String feedback = "";
+        Challenge reviewed = null;       // an exercise that runs and checks out but that the reviewer still had remarks on: kept as a last resort
         for (int attempt = 1; attempt <= MAX_GENERATION_TRIES; attempt++) {
             try {
                 Lang lang = Lang.of(language);
@@ -130,7 +228,11 @@ public class ChallengeService {
                     ch.familyId = null;
                 }
                 String problem = validate(ch, lesson);
-                if (problem == null && anchor.isEmpty()) problem = review(ch, c, lesson);
+                if (problem == null && anchor.isEmpty()) problem = quality(ch);
+                if (problem == null && anchor.isEmpty()) {
+                    problem = review(ch, c, lesson);
+                    if (problem != null) reviewed = ch;
+                }
                 if (problem == null) {
                     ch.validated = true;
                     ch.origin = "ai";
@@ -146,7 +248,60 @@ public class ChallengeService {
                 System.err.println("[challenge] generation " + attempt + " failed: " + e.getMessage());
             }
         }
+        if (reviewed != null) {
+            // Every try had remarks, but at least one was a working, tested exercise. A learner is better served by it than by an error;
+            // the remarks are in the log for tuning the prompt.
+            System.err.println("[challenge] kept a working exercise despite reviewer remarks: " + reviewed.title);
+            reviewed.validated = true;
+            reviewed.origin = "ai";
+            reviewed.contentVersion = Teaching.CONTENT_VERSION;
+            return challenges.save(reviewed);
+        }
         return null;
+    }
+
+    private static final Pattern STATEMENT = Pattern.compile("(?i)(print|println|printf|console\\.log|cout|console\\.write|string\\.format|return\\s|throw\\s|raise\\s)");
+
+    /**
+     * What learners reported and the model keeps doing: giving away the answer in the brief, and a "guided" starter that is only TODO
+     * comments although the brief says the headers are written. Cheap checks on a working exercise; null when it is fine.
+     */
+    String quality(Challenge ch) {
+        Lang lang = Lang.of(ch.language);
+        Map<String, String> starter = Json.files(ch.starterFilesJson);
+        Map<String, String> ref = Json.files(ch.referenceSolutionJson);
+
+        if ("HEAVY".equals(ch.scaffolding)) {
+            for (var e : starter.entrySet()) {
+                if (e.getKey().equals(lang.mainFile)) continue;
+                String code = stripComments(e.getValue(), lang).strip();
+                boolean declares = lang == Lang.PYTHON ? Pattern.compile("(?m)^\\s*(class|def)\\s").matcher(code).find()
+                        : Pattern.compile("\\b(class|interface|struct|enum|record)\\b").matcher(code).find();
+                if (!declares || !code.contains("("))
+                    return "HEAVY scaffolding: " + e.getKey() + " is only comments or an empty shell. Write out its class declaration, fields and every method header, with TODO comments inside the bodies";
+            }
+        }
+
+        Set<String> given = new HashSet<>();                       // lines the learner is handed anyway
+        starter.values().forEach(t -> t.lines().forEach(l -> given.add(squash(l))));
+        String brief = squash(ch.descriptionMd);
+        for (var e : ref.entrySet()) {
+            if (e.getKey().equals(lang.testFile)) continue;
+            if (Boolean.TRUE.equals(ch.mainLocked) && e.getKey().equals(lang.mainFile)) continue;   // provided and shown, nothing to give away
+            for (String line : e.getValue().split("\\R")) {
+                String l = squash(line);
+                if (l.length() < 24 || !l.contains("(") || !STATEMENT.matcher(l).find() || given.contains(l)) continue;
+                if (brief.contains(l)) return "descriptionMd gives away a line of the solution: `" + l + "`. Describe what it must do and print in words instead; show only signatures and the expected output";
+            }
+        }
+        return null;
+    }
+
+    private static String squash(String s) { return s == null ? "" : s.strip().replaceAll("\\s+", " "); }
+
+    private static String stripComments(String code, Lang lang) {
+        String s = code.replaceAll("(?s)/\\*.*?\\*/", "");
+        return s.replaceAll(lang == Lang.PYTHON ? "(?m)#.*$" : "(?m)//.*$", "");
     }
 
     /** The lesson text the learner reads for this concept (null if it can't be had). */
@@ -184,6 +339,10 @@ public class ChallengeService {
                    never "Test 1". A name must not reveal more than the description already says.
                 9. Keep the test file simple and short: each test is a few lines and uses only classes and methods the description names. Put the plain, everyday
                    cases first and the trickier ones (edge cases that follow from the description) last: the learner sees the first half and the rest run on submit.
+                10. Never give the answer away. descriptionMd, its Tips and its examples say WHAT each method must do and print, in words, with the exact expected output.
+                   They never contain the statement or expression that produces it: no println/print/return line from the reference solution, no ready-made formula or
+                   string concatenation. Signatures, field names and types may be given. A Tips item is a reminder of an idea, never a line of code.
+                11. descriptionMd is plain Markdown. Name a file in backticks, like `Main.java`. Use "##" only at the start of a line for the sections listed below, never inside a sentence.
                 """.formatted(lesson == null ? "" : " (given below)", note != null && note.avoid() != null ? " Do not use these, they come later: " + note.avoid() + "." : "",
                 later.isBlank() ? "" : " Not yet taught: " + later + ".", before.isBlank() ? "basic syntax only" : before));
         if (lesson != null) sb.append("\n--- LESSON THE LEARNER HAS JUST READ ---\n").append(lesson.length() > 7000 ? lesson.substring(0, 7000) : lesson).append("\n--- END OF LESSON ---\n");
@@ -244,6 +403,10 @@ public class ChallengeService {
         var root = challenges.findById(fam).filter(c -> c.language.equals(language) && c.validated);
         if (root.isPresent()) return root.get();
         if (!ai.isConfigured()) return null;
+        return shared("tr|" + fam + "|" + language, CurrentUser.get(), () -> translate(src, language, fam), PICK_WAIT_MS);
+    }
+
+    private Challenge translate(Challenge src, String language, long fam) {
         Lang lang = Lang.of(language);
         String feedback = "";
         int tries = src.guideJson != null ? 3 : 2;               // guided exercises are shared by everyone, so it is worth a third go
@@ -496,7 +659,21 @@ public class ChallengeService {
     static RunResult hideTestDiagnostics(Challenge ch, RunResult r) {
         Set<String> hidden = Json.files(ch.testsJson).keySet();
         var own = r.diagnostics().stream().filter(d -> !hidden.contains(d.file()) && !d.file().startsWith("check.") && !d.file().startsWith("Check.")).toList();
-        if (own.isEmpty() || own.size() == r.diagnostics().size()) return r;
+        if (r.diagnostics().isEmpty() || own.size() == r.diagnostics().size()) return r;
+        if (own.isEmpty()) {
+            // Everything that failed is in the hidden test file: the learner's code is missing something the tests use. A line number in a
+            // file they cannot open means nothing, so say what is missing, without a location.
+            var seen = new LinkedHashSet<String>();
+            for (var d : r.diagnostics()) {
+                if (!"error".equalsIgnoreCase(d.severity())) continue;
+                seen.add(d.message().strip());
+                if (seen.size() == 4) break;
+            }
+            var friendly = seen.stream().map(m -> new RunResult.Diagnostic("", 0, "error",
+                    "The tests can't build against your code yet: " + m + ". Check the class, method and field names and signatures against the Requirements in the brief.")).toList();
+            if (friendly.isEmpty()) return r;
+            return new RunResult(r.compiled(), friendly, r.stdout(), r.stderr(), r.tests(), r.timedOut(), r.exitCode(), r.millis());
+        }
         return new RunResult(r.compiled(), own, r.stdout(), r.stderr(), r.tests(), r.timedOut(), r.exitCode(), r.millis());
     }
 
@@ -520,7 +697,8 @@ public class ChallengeService {
         Challenge ch = new Challenge();
         ch.language = language; ch.concept = concept; ch.difficulty = difficulty; ch.scaffolding = scaffolding;
         ch.title = n.path("title").asText();
-        ch.descriptionMd = n.path("descriptionMd").asText();
+        // "as shown below in ## Main.java": a heading marker in the middle of a sentence would show as raw text
+        ch.descriptionMd = n.path("descriptionMd").asText().replaceAll("(?m)(?<=\\S[ \\t])#{2,6}[ \\t]+([A-Za-z0-9_]+\\.[A-Za-z]+)", "`$1`");
         ch.expectedMinutes = Math.max(3, Math.min(45, n.path("expectedMinutes").asInt(10)));
         ch.starterFilesJson = Json.write(Json.M.convertValue(n.path("starterFiles"), Map.class));
         // the single test file is sometimes returned as bare text instead of {"file": "text"}
@@ -627,8 +805,8 @@ public class ChallengeService {
     private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid, String teaching, boolean mainProvided) {
         String concept = c.title();
         String scaffoldRule = switch (scaffolding) {
-            case "HEAVY" -> "HEAVY scaffolding: the starter is almost complete. Most classes are written; the learner fills 2-3 clearly marked TODO gaps.";
-            case "PARTIAL" -> "PARTIAL scaffolding: the starter has class skeletons, signatures and TODO comments; the learner writes the bodies and some members.";
+            case "HEAVY" -> "HEAVY scaffolding: the starter is almost complete. Every file the learner edits already has its class declaration, its fields and every method header it needs, written out; the learner fills 2-3 clearly marked TODO gaps inside them. Never leave a learner file as only comments.";
+            case "PARTIAL" -> "PARTIAL scaffolding: the starter has class skeletons, signatures and TODO comments; the learner writes the bodies and some members. Less is written than for HEAVY: the learner also adds some fields and methods themselves.";
             default -> mainProvided
                     ? "BLANK scaffolding: the starter has only the problem code and an empty stub for each new type. The description is a spec with exact class and method signatures; the learner writes the bodies."
                     : "BLANK scaffolding: the starter contains only a minimal main file (or nothing else). The description is a spec with exact class and method signatures; the learner writes everything.";

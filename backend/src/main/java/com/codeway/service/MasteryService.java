@@ -84,8 +84,20 @@ public class MasteryService {
         return Math.max(1, Math.min(5, (int) Math.ceil(score * 5)));
     }
 
+    /**
+     * How much of the starter is written for the learner. The first step down comes after one decent pass (a clean pass or a light hint
+     * lifts the score past {@link #HEAVY_BELOW}), so the second challenge is visibly less hand-held than the first; leaning on the
+     * full solution does not.
+     */
+    public static final double HEAVY_BELOW = 0.22;
     public static String scaffolding(double score) {
-        return score < 0.35 ? "HEAVY" : score < 0.70 ? "PARTIAL" : "BLANK";
+        return score < HEAVY_BELOW ? "HEAVY" : score < 0.70 ? "PARTIAL" : "BLANK";
+    }
+
+    /** The score a learner would have after a clean pass of a challenge at this difficulty: used to prepare their next challenge ahead. */
+    public static double scoreAfterCleanPass(double before, int difficulty) {
+        double expected = 1.0 / (1.0 + Math.exp(-8.0 * (before - difficultyRating(difficulty))));
+        return nextScore(before, 1.0, expected, true);
     }
 
     static double difficultyRating(int difficulty) { return 0.1 + (difficulty - 1) * 0.2; }

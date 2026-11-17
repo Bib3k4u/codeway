@@ -32,6 +32,8 @@ public class AiClient {
         return !apiKey.isBlank() && !model.isBlank() && (!apiVersion.isBlank() ? !endpoint.isBlank() : true);
     }
 
+    public boolean hasHeadroom(Long userId, int calls) { return quota.hasHeadroom(userId, calls); }
+
     public String model() { return model; }
     public String hintModel() { return hintModel.isBlank() ? model : hintModel; }
 
@@ -56,8 +58,21 @@ public class AiClient {
             HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(120))
                     .header("Content-Type", "application/json");
             if (azure) rb.header("api-key", apiKey); else rb.header("Authorization", "Bearer " + apiKey);
-            HttpResponse<String> res = http.send(rb.POST(HttpRequest.BodyPublishers.ofString(Json.write(body))).build(), HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() / 100 != 2) throw new IllegalStateException("AI request failed (" + res.statusCode() + "): " + abbreviate(res.body()));
+            HttpRequest request = rb.POST(HttpRequest.BodyPublishers.ofString(Json.write(body))).build();
+            HttpResponse<String> res = null;
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                // a busy or briefly unavailable model (429, 5xx) or a dropped connection is retried before it counts as a failure
+                try {
+                    res = http.send(request, HttpResponse.BodyHandlers.ofString());
+                    if (res.statusCode() != 429 && res.statusCode() / 100 != 5) break;
+                } catch (java.net.http.HttpTimeoutException e) {
+                    throw e;                                   // already waited the full limit: don't wait it again
+                } catch (java.io.IOException e) {
+                    if (attempt == 3) throw e;
+                }
+                if (attempt < 3) Thread.sleep(attempt * 2000L);
+            }
+            if (res == null || res.statusCode() / 100 != 2) throw new IllegalStateException("AI request failed (" + (res == null ? "no response" : res.statusCode()) + "): " + (res == null ? "" : abbreviate(res.body())));
             JsonNode root = Json.M.readTree(res.body());
             return root.path("choices").path(0).path("message").path("content").asText();
         } catch (IllegalStateException e) {

@@ -25,6 +25,7 @@ public class AuthController {
         User u = users.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
         var m = new java.util.HashMap<String, Object>(Map.of("id", u.id, "email", u.email, "displayName", u.displayName, "preferredLanguage", preferred(u)));
         if (u.avatarUrl != null) m.put("avatarUrl", u.avatarUrl);
+        m.put("languageChosen", u.preferredLanguage != null);   // false until they pick one: the app asks on first sign-in
         return m;
     }
 
