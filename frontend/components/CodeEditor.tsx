@@ -46,6 +46,16 @@ const beforeMount: BeforeMount = (monaco) => {
 /** Text to mark everywhere it appears in the open file (the project search). */
 export type Highlight = { query: string; cs: boolean };
 /** Ask the editor to select and scroll to a range of a file; `n` changes with every request so the same one can be repeated. */
+/** Where the cursor and scroll were in each file, so coming back to a tab picks up where it was left. */
+const viewStates = new Map<string, MonacoNs.ICodeEditorViewState | null>();
+
+/** A new challenge starts from clean editor models: files of the same name from the last one must not show through. */
+export function resetEditorModels() {
+  viewStates.clear();
+  const monaco = (globalThis as { monaco?: { editor: { getModels(): { dispose(): void }[] } } }).monaco;
+  try { monaco?.editor.getModels().forEach((m) => m.dispose()); } catch { /* nothing to clear */ }
+}
+
 export type Reveal = { path: string; start: number; end: number; n: number };
 
 export default function CodeEditor({ path, value, onChange, diagnostics, files, readOnly, highlight, reveal }: {
@@ -112,6 +122,10 @@ export default function CodeEditor({ path, value, onChange, diagnostics, files, 
       keepCurrentModel
       onMount={(editor, monaco) => {
         monacoRef.current = monaco; editorRef.current = editor; marks.current = null; applyMarkers();
+        const saved = viewStates.get(path);
+        if (saved) editor.restoreViewState(saved);
+        const remember = () => viewStates.set(path, editor.saveViewState());
+        editor.onDidChangeCursorPosition(remember); editor.onDidScrollChange(remember);
         // a model kept from an earlier challenge's file of the same name must not show its old text
         if (editor.getValue() !== value) editor.getModel()?.setValue(value);
       }}

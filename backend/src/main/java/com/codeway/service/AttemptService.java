@@ -106,6 +106,27 @@ public class AttemptService {
 
     private static Instant lastActive(Attempt a) { return a.lastActiveAt != null ? a.lastActiveAt : a.startedAt; }
 
+    /**
+     * An editor bug once saved the provided main file's text over the learner's other files. A saved file that is a copy of the provided
+     * file, although its starter is something else, is that damage: it goes back to its starter text so the learner can carry on.
+     */
+    static Map<String, String> healedDraft(Challenge ch, Map<String, String> draft) {
+        List<String> locked = lockedFiles(ch);
+        if (locked.isEmpty()) return draft;
+        Map<String, String> starter = Json.files(ch.starterFilesJson);
+        Map<String, String> out = new LinkedHashMap<>(draft);
+        for (String l : locked) {
+            String provided = starter.get(l);
+            if (provided == null || provided.isBlank()) continue;
+            for (var e : draft.entrySet()) {
+                String n = e.getKey();
+                if (locked.contains(n) || !starter.containsKey(n)) continue;
+                if (e.getValue() != null && e.getValue().strip().equals(provided.strip()) && !provided.strip().equals(starter.get(n).strip())) out.put(n, starter.get(n));
+            }
+        }
+        return out;
+    }
+
     /** Starts making the challenge the learner is most likely to want next, so it is waiting when they get there. */
     private void prepareNext(Long userId, Challenge ch, double score, boolean mastered) {
         if (mastered) return;
@@ -128,7 +149,7 @@ public class AttemptService {
                 Map.entry("requires", catalog.requires(ch.concept).stream().map(r -> Map.of("id", r.id(), "title", r.title())).toList()),
                 Map.entry("sampleOutput", challengeService.sampleOutput(ch))));
         if (resumed) {
-            if (a.draftFilesJson != null) out.put("draft", Json.files(a.draftFilesJson));
+            if (a.draftFilesJson != null) out.put("draft", healedDraft(ch, Json.files(a.draftFilesJson)));
             out.put("hints", Json.list(a.hintsJson));
             Object last = Json.any(a.lastRunJson);
             if (last != null) out.put("lastRun", last);

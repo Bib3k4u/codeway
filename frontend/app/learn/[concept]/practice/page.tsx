@@ -22,7 +22,7 @@ import ChallengeClock from "@/components/practice/ChallengeClock";
 import FloatingTip, { type Tip } from "@/components/FloatingTip";
 import GuidePanel from "@/components/practice/GuidePanel";
 import FileSearch from "@/components/practice/FileSearch";
-import type { Highlight, Reveal } from "@/components/CodeEditor";
+import { resetEditorModels, type Highlight, type Reveal } from "@/components/CodeEditor";
 import { replaceAll, replaceOne, type Match } from "@/lib/search";
 import EditorGroups, { closeIn, moveTab, openIn, removeEverywhere, renameIn, splitOut, type Drag, type Group } from "@/components/practice/EditorGroups";
 import { duration } from "@/lib/time";
@@ -34,6 +34,24 @@ const quotaState = (q?: HintQuota): QuotaState | null => (q ? { limit: q.limit, 
 const hintNames = ["Nudge", "Concept", "Partial code", "Solution"];
 
 /** Picks the language: ?lang= in the URL, else the one this learner last chose, else Java. */
+/**
+ * An editor bug once saved the provided main file's text over the learner's other files. A saved file that is a copy of a provided file,
+ * although its starter is something else, is that damage: it goes back to its starter text.
+ */
+function healDraft(draft: Files | undefined, starter: Files, locked: string[]): Files {
+  if (!draft) return starter;
+  const out: Files = { ...draft };
+  for (const l of locked) {
+    const provided = starter[l]?.trim();
+    if (!provided) continue;
+    for (const [n, text] of Object.entries(draft)) {
+      if (locked.includes(n) || starter[n] === undefined) continue;
+      if (text.trim() === provided && starter[n].trim() !== provided) out[n] = starter[n];
+    }
+  }
+  return out;
+}
+
 export default function Practice() {
   const { concept } = useParams<{ concept: string }>();
   const search = useSearchParams();
@@ -251,7 +269,8 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
       : redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : startChallenge(lang, concept, setWaited, () => started.current !== startKey);
     req
       .then((r) => {
-        const initial = r.draft ?? r.challenge.files;
+        resetEditorModels();
+        const initial = healDraft(r.draft, r.challenge.files, r.challenge.lockedFiles ?? []);
         saved.current = initial; initialFiles.current = initial;
         setStart(r); setQuiz(r.guide?.quiz ?? null); setLeft(r.guide ? "steps" : "brief"); setFiles(initial); setHintQuota(quotaState(r.hintQuota)); setHintNote("");
         const names = Object.keys(initial);
@@ -285,7 +304,10 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
       setRun(r); setLive(null); setConsoleOpen("1"); refreshStats();
       if (mode === "tests") { setTestRun(r); setRunSeq((n) => n + 1); }
       setBottom(mode === "tests" && r.compiled ? "tests" : "console");
-      if (!r.compiled && r.diagnostics[0]?.file && files[r.diagnostics[0].file] !== undefined) openFile(r.diagnostics[0].file);
+      // jump to the first error in a file the learner can edit; the provided Main fails to build until their classes exist, so it is no place to send them
+      const locked = start?.challenge.lockedFiles ?? [];
+      const failing = r.compiled ? undefined : r.diagnostics.find((d) => d.file && files[d.file] !== undefined && !locked.includes(d.file));
+      if (failing) openFile(failing.file);
     } catch (e) { setRun({ compiled: false, diagnostics: [], stdout: "", stderr: (e as Error).message, tests: [], timedOut: false, exitCode: 1, millis: 0, runs: 0 }); setBottom("console"); }
     finally { setBusy(null); }
   }
@@ -676,11 +698,6 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
               </nav>
               <div className="hidden sm:flex"><Splitter orientation="vertical" label="Resize file list" onMove={moveFiles} onNudge={(d) => setFilesW(String(filesWidth + d))} onReset={() => setFilesW("176")} /></div>
               <div className="flex min-w-0 flex-1 flex-col">
-                {!frozen && providedFiles.includes(active) && (
-                  <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
-                    <Lock size={13} className="shrink-0" /><span><b className="font-semibold text-label">{active}</b> is provided for you and can&apos;t be edited. Press Run to see it use your classes. You write the other files.</span>
-                  </p>
-                )}
                 {locked && (
                   <p role="status" className="flex items-center gap-2 border-b border-sep bg-card2 px-4 py-2 text-[13px] text-label2">
                     <Lock size={13} className="shrink-0" />Read the code first. It runs, but it has a design problem. Answer the question in the Steps tab to start editing.

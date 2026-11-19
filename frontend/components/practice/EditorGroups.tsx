@@ -171,7 +171,7 @@ export default function EditorGroups({ groups, focusId, files, diagnostics, read
 
               <div className={`relative min-h-0 flex-1 ${focused && groups.length > 1 ? "shadow-[inset_0_2px_0_var(--accent-fill)]" : ""}`}>
                 {g.active && files[g.active] !== undefined
-                  ? <CodeEditor path={g.active} value={files[g.active]} onChange={(v) => onEdit(g.active, v)} diagnostics={diagnostics} files={files} readOnly={readOnly || lockedPaths.includes(g.active)} highlight={highlight} reveal={g.id === focusId ? reveal : null} />
+                  ? <CodeEditor key={g.active} path={g.active} value={files[g.active]} onChange={(v) => onEdit(g.active, v)} diagnostics={diagnostics} files={files} readOnly={readOnly || lockedPaths.includes(g.active)} highlight={highlight} reveal={g.id === focusId ? reveal : null} />
                   : <p className="grid h-full place-items-center px-6 text-center text-[13px] text-label3">Drag a file here from the list, or click one to open it.</p>}
                 {/* while a file is being dragged, the column shows where it would go */}
                 {drag && (

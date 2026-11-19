@@ -55,4 +55,18 @@ class LockedMainTest {
                 Map.of(), CodeRunner.Mode.MAIN, null);
         assertEquals("-1", r.stdout().trim());
     }
+
+    @Test void aDraftWhereTheProvidedMainWasSavedOverOtherFilesIsRepaired() {
+        Challenge ch = locked(true);
+        String main = Json.files(ch.starterFilesJson).get("Main.java");
+        // the editor bug: Calc.java holds a copy of Main.java
+        var damaged = Map.of("Main.java", main, "Calc.java", main);
+        var healed = AttemptService.healedDraft(ch, damaged);
+        assertEquals("class Calc {}", healed.get("Calc.java"));
+        // the learner's own work is left alone
+        var fine = Map.of("Main.java", main, "Calc.java", "class Calc { int x; }");
+        assertEquals(fine, AttemptService.healedDraft(ch, fine));
+        // a challenge whose main file is the learner's own has nothing to repair
+        assertEquals(damaged, AttemptService.healedDraft(locked(false), damaged));
+    }
 }
