@@ -282,6 +282,11 @@ public class ChallengeService {
             }
         }
 
+        String reads = SOURCE_READ.matcher(String.join("\n", Json.files(ch.testsJson).values())).find() ? "x" : null;
+        if (reads != null) return "the tests read source files as text. Check behaviour instead (run the code, use a fake, add a new subclass in the test): a text search fails on comments and on words that merely contain `if` or `switch`";
+        String stale = staleTodo(ch, lang, starter);
+        if (stale != null) return stale;
+
         Set<String> given = new HashSet<>();                       // lines the learner is handed anyway
         starter.values().forEach(t -> t.lines().forEach(l -> given.add(squash(l))));
         String brief = squash(ch.descriptionMd);
@@ -292,6 +297,28 @@ public class ChallengeService {
                 String l = squash(line);
                 if (l.length() < 24 || !l.contains("(") || !STATEMENT.matcher(l).find() || given.contains(l)) continue;
                 if (brief.contains(l)) return "descriptionMd gives away a line of the solution: `" + l + "`. Describe what it must do and print in words instead; show only signatures and the expected output";
+            }
+        }
+        return null;
+    }
+
+    private static final Pattern SOURCE_READ = Pattern.compile("(?i)(Files\\.(readAll|readString|lines|newBufferedReader)|Paths?\\.(get|of)\\(|new File\\(|FileReader|\\breadAllBytes|\\breadString|fs\\.(readFile|existsSync|readdir)|require\\(['\"]fs['\"]\\)|open\\(['\"][^'\"]*\\.(py|js)|ifstream|fopen\\(|File\\.(ReadAll|Open)|StreamReader)");
+    private static final Pattern REMOVES = Pattern.compile("(?i)\\b(remove|delete|get rid of|eliminate|replace)\\b.*\\b(switch|if[/ -]?else|if[ -]chain|if statements?|type[ -]?codes?|instanceof|else[ -]if|conditionals?)\\b");
+    private static final Pattern BRANCHING = Pattern.compile("\\b(switch|if|else|instanceof)\\b");
+
+    /**
+     * A TODO that tells the learner to remove a switch or if-else chain that the starter does not contain (the model writes the
+     * story of an old design into comments even when the starter is already the new one). Null when every such TODO has something to remove.
+     */
+    private static String staleTodo(Challenge ch, Lang lang, Map<String, String> starter) {
+        String code = starter.entrySet().stream().filter(e -> !e.getKey().equals(lang.testFile)).map(e -> stripComments(e.getValue(), lang)).collect(Collectors.joining("\n"));
+        if (BRANCHING.matcher(code).find()) return null;           // there is branching in the starter, so "remove it" can be meant
+        for (var e : starter.entrySet()) {
+            for (String line : e.getValue().split("\\R")) {
+                String l = line.strip();
+                boolean comment = l.startsWith("//") || l.startsWith("#") || l.startsWith("*") || l.startsWith("/*");   // a TODO often runs on to the next comment line
+                if (comment && REMOVES.matcher(l).find())
+                    return "a comment in " + e.getKey() + " says to remove a switch / if-else / type code, but the starter has none: `" + l + "`. A TODO says only what to write at that spot, never what an older design did";
             }
         }
         return null;
@@ -343,6 +370,12 @@ public class ChallengeService {
                    They never contain the statement or expression that produces it: no println/print/return line from the reference solution, no ready-made formula or
                    string concatenation. Signatures, field names and types may be given. A Tips item is a reminder of an idea, never a line of code.
                 11. descriptionMd is plain Markdown. Name a file in backticks, like `Main.java`. Use "##" only at the start of a line for the sections listed below, never inside a sentence.
+                12. A TODO comment in the starter says what to write at that exact spot, in the words of the matching numbered Requirement. It never refers to code that is not
+                   in the starter (never "remove the switch / if-else / type code" unless that code is really there), never says "refactor" when the refactor is already done,
+                   and is never placed on a line that already does what it asks (no "TODO: store the value" above the line that stores it). Every TODO is a gap the learner fills.
+                13. Tests check behaviour by running the learner's code. They never open, read or search the source files (no Files.readString, no contains("if") on source
+                   text): such a check fails on comments and on ordinary words ("notify", "specific") and punishes correct code. To show that a design is open to extension,
+                   write a new class in the test file and check the original class works with it unchanged, or pass in a fake and check it was used.
                 """.formatted(lesson == null ? "" : " (given below)", note != null && note.avoid() != null ? " Do not use these, they come later: " + note.avoid() + "." : "",
                 later.isBlank() ? "" : " Not yet taught: " + later + ".", before.isBlank() ? "basic syntax only" : before));
         if (lesson != null) sb.append("\n--- LESSON THE LEARNER HAS JUST READ ---\n").append(lesson.length() > 7000 ? lesson.substring(0, 7000) : lesson).append("\n--- END OF LESSON ---\n");
@@ -374,6 +407,7 @@ public class ChallengeService {
                     3. Is any rule the tests check (names, signatures, output text, format, exceptions) missing or vague in the description?
                     4. Does the description contradict the starter files, the example output or itself?
                     5. Is any statement in the description untrue for the language, or any explanation in "New in this challenge" wrong?
+                    6. Does a TODO comment in the starter files refer to code that is not there (for example "remove the switch" when there is none), say "refactor" when the refactor is already done, or sit right above a line that already does what it asks?
                     Return JSON: {"problems": ["one short sentence per problem, saying exactly what to change"]}. Use an empty list if there are none.
                     """.formatted(c.title(), lesson == null ? "(not available)" : (lesson.length() > 5000 ? lesson.substring(0, 5000) : lesson), ch.descriptionMd,
                     cut(Json.files(ch.starterFilesJson).toString(), 5000), Json.strings(ch.testNamesJson), cut(Json.files(ch.referenceSolutionJson).toString(), 5000));

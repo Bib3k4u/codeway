@@ -109,6 +109,35 @@ class GenerationTest {
         assertNull(service().quality(challenge("PARTIAL", Map.of("Car.java", starter), Map.of("Car.java", REF), "It already has `return \"Car: \" + name.toUpperCase() + \"!\";`")));
     }
 
+    // ---- TODOs that describe code that is not there ----
+    private static final String STALE = "public class PaymentFeeCalculator {\n    // TODO: Refactor to use PaymentMethod abstraction\n    // Remove type code and if/switch logic\n\n"
+            + "    private final PaymentMethod method;\n\n    public PaymentFeeCalculator(PaymentMethod method) {\n        // TODO: Store given method\n        this.method = method;\n    }\n\n"
+            + "    public double calculateFee(double amount) {\n        // TODO: Delegate to PaymentMethod abstraction\n        return 0.0;\n    }\n}\n";
+    private static final String REF_FEE = "public class PaymentFeeCalculator {\n    private final PaymentMethod method;\n    public PaymentFeeCalculator(PaymentMethod method) { this.method = method; }\n"
+            + "    public double calculateFee(double amount) { return method.fee(amount); }\n}\n";
+
+    @Test void aTodoThatSaysToRemoveASwitchThatIsNotThereIsRejected() {
+        String problem = service().quality(challenge("PARTIAL", Map.of("PaymentFeeCalculator.java", STALE), Map.of("PaymentFeeCalculator.java", REF_FEE), "Delegate the fee to the method."));
+        assertNotNull(problem);
+        assertTrue(problem.contains("PaymentFeeCalculator.java") && problem.contains("none"));
+    }
+
+    @Test void aTodoToRemoveASwitchIsFineWhenTheStarterHasOne() {
+        String old = "public class PaymentFeeCalculator {\n    public double calculateFee(String type, double amount) {\n        // TODO: remove this switch and delegate to a PaymentMethod\n"
+                + "        switch (type) { case \"card\": return amount * 0.03; default: return 0; }\n    }\n}\n";
+        assertNull(service().quality(challenge("PARTIAL", Map.of("PaymentFeeCalculator.java", old), Map.of("PaymentFeeCalculator.java", REF_FEE), "Replace the switch.")));
+    }
+
+    @Test void testsThatSearchTheSourceTextAreRejected() {
+        var c = challenge("PARTIAL", Map.of("Car.java", FULL), Map.of("Car.java", REF), "Write describe().");
+        c.testsJson = Json.write(Map.of("TestMain.java", "Check.run(\"no if\", () -> { String code = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(\"Car.java\"))); Check.isTrue(!code.contains(\"if\"), \"x\"); });"));
+        String problem = service().quality(c);
+        assertNotNull(problem);
+        assertTrue(problem.contains("read source files"));
+        c.testsJson = Json.write(Map.of("TestMain.java", "Check.run(\"describes\", () -> Check.equals(\"Car: AUDI!\", new Car(\"audi\").describe()));"));
+        assertNull(service().quality(c));
+    }
+
     // ---- compiler errors in the hidden tests ----
     @Test void errorsOnlyInTheHiddenTestFileBecomeAMessageWithoutALocation() {
         var c = new Challenge();
