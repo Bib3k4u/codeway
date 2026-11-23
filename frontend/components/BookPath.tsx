@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, BookOpen, Check, CheckCircle2, Flame, Play, Search, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, Check, CheckCircle2, Flame, Play, Search, X } from "lucide-react";
 import BookCover, { COVER_H, COVER_W } from "@/components/BookCover";
 import ConceptIcon from "@/components/ConceptIcon";
 import Ring from "@/components/Ring";
-import { api, type ConceptRow, type HistoryRow, type Track } from "@/lib/api";
+import type { ConceptRow, Track } from "@/lib/api";
 import type { LangId } from "@/lib/lang";
 import { byTrack } from "@/lib/tracks";
 
@@ -17,6 +17,13 @@ const inkOf = (hex: string) => {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.46 ? "#14110a" : "#ffffff";
 };
 /** How long a book takes to flip shut before the next one opens. */
+/** Room one book takes on a shelf (its width and the gap), and what an open book needs on top of that. */
+/** One size for the card beside the shelf, whether it asks to pick a book or shows one: as tall as the first shelf (--card-h, measured). */
+const CARD_H = "min-h-[280px] lg:h-[var(--card-h)]";
+const BOOK_ROOM = 60;
+const OPEN_BOOK_ROOM = 130;
+/** Padding inside a shelf row (left and right). */
+const SHELF_PAD = 38;
 const RETURN_MS = 480;
 
 const hash = (s: string) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
@@ -89,8 +96,45 @@ function TrackSection({ track, rows, shown, language, jump, onJump }: { track: T
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [history, setHistory] = useState<Record<string, HistoryRow[]>>({});
   useEffect(() => () => clearTimeout(timer.current), []);
+
+  // The shelf takes half the width on a wide screen. A shelf is filled to the edge before the next one is started; an open book needs more
+  // room than a spine, so while one is open the books at the end of its shelf make way for it on the next shelf down.
+  const shelfRef = useRef<HTMLDivElement>(null);
+  const [shelfW, setShelfW] = useState(560);
+  useEffect(() => {
+    const el = shelfRef.current;
+    if (!el) return;
+    const fit = () => setShelfW(el.clientWidth);
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const firstShelf = useRef<HTMLDivElement>(null);
+  const [cardH, setCardH] = useState(302);
+  useEffect(() => {
+    const el = firstShelf.current;
+    if (!el) return;
+    const fit = () => setCardH(Math.round(el.getBoundingClientRect().height));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const openId = open?.id;
+  const shelves = useMemo(() => {
+    const room = Math.max(BOOK_ROOM, shelfW - SHELF_PAD);
+    const out: ConceptRow[][] = [[]];
+    let used = 0;
+    for (const c of shown) {
+      const cost = BOOK_ROOM + (c.id === openId ? OPEN_BOOK_ROOM : 0);
+      if (used + cost > room && out[out.length - 1].length > 0) { out.push([]); used = 0; }
+      out[out.length - 1].push(c);
+      used += cost;
+    }
+    return out;
+  }, [shown, shelfW, openId]);
 
   const openRow = open ? shown.find((r) => r.id === open.id) : undefined;
   const practiced = rows.filter((r) => r.practice);
@@ -129,13 +173,6 @@ function TrackSection({ track, rows, shown, language, jump, onJump }: { track: T
     return () => window.removeEventListener("keydown", onKey);
   }, [open, putBack]);
 
-  // what you did on the open book, fetched the first time it is opened
-  useEffect(() => {
-    if (!open || history[open.id]) return;
-    const id = open.id;
-    api<HistoryRow[]>(`/attempts/history?language=${language}&concept=${id}`).then((h) => setHistory((m) => ({ ...m, [id]: h }))).catch(() => setHistory((m) => ({ ...m, [id]: [] })));
-  }, [open, history, language]);
-
   const move = (e: React.KeyboardEvent, i: number) => {
     const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!d) return;
@@ -163,32 +200,39 @@ function TrackSection({ track, rows, shown, language, jump, onJump }: { track: T
         </span>
       </header>
 
-      {/* the shelf: upright spines of different heights, one leaning; an open book is turned to show its cover */}
-      <div className="book-shelf-wrap">
-        <ol className="book-row" aria-label={`${track.title}: ${shown.length} of ${rows.length} books, in learning order`}>
-          {shown.map((c, k) => {
-            const i = rows.indexOf(c);   // numbers and colours stay the book's own while a search hides its neighbours
-            return <Book key={c.id} c={c} n={i + 1} total={rows.length} color={COLORS[i % COLORS.length]} trackTitle={track.title} leanOn={k === shown.length - 1 && k >= 3 ? spineH(shown[k - 1]) : undefined}
-              open={!!open && !open.out && open.id === c.id} onPick={() => pick(c.id)} onKeyDown={(e) => move(e, k)} />;
-          })}
-        </ol>
-        <div aria-hidden className="book-shelf" />
-      </div>
+      {/* shelf on the left half, the open book's card on the right half (stacked on a narrow screen) */}
+      <div className="grid gap-7 lg:grid-cols-2 lg:items-start">
+        {/* the shelf: upright spines of different heights, one leaning on the last book of a row; an open book is turned to show its cover */}
+        <div ref={shelfRef} className="min-w-0">
+          {shelves.map((row, r) => (
+            <div key={r} ref={r === 0 ? firstShelf : undefined} className={`book-shelf-wrap ${r > 0 ? "mt-2" : ""}`}>
+              <ol className="book-row" aria-label={r === 0 ? `${track.title}: ${shown.length} of ${rows.length} books, in learning order` : `${track.title}: shelf ${r + 1}`}>
+                {row.map((c, k) => {
+                  const i = rows.indexOf(c);   // numbers and colours stay the book's own while a search hides its neighbours
+                  return <Book key={c.id} c={c} n={i + 1} total={rows.length} color={COLORS[i % COLORS.length]} trackTitle={track.title} leanOn={k === row.length - 1 && k >= 3 ? spineH(row[k - 1]) : undefined}
+                    open={!!open && !open.out && open.id === c.id} href={`/learn/${c.id}?lang=${language}`} onPick={() => pick(c.id)} onKeyDown={(e) => move(e, k)} />;
+                })}
+              </ol>
+              <div aria-hidden className="book-shelf" />
+            </div>
+          ))}
+        </div>
 
-      {/* the card sits right under the shelf */}
-      <div ref={cardRef} className="mt-7 min-w-0 scroll-mt-24">
-        {openRow ? (
-          <BookCard key={openRow.id} c={openRow} order={index + 1} total={rows.length} color={COLORS[index % COLORS.length]} language={language} out={open!.out}
-            history={history[openRow.id]} requires={openRow.requires ?? []} onClose={() => putBack()} onGo={onJump} />
-        ) : (
-          <div className="card rise flex min-h-[220px] flex-col justify-center px-7 py-5">
-            <p className="eyebrow mb-2">Track {track.order}</p>
-            <h4 className="display text-[26px]">Pick a book</h4>
-            <p className="mt-2 max-w-[56ch] text-[14px] leading-snug text-label2">Click a book on the shelf to turn it around: you will see its cover, what is inside and where you stand. Books fill with colour as you progress.</p>
-            {upNext && <button className="btn btn-primary mt-4 self-start" onClick={() => pick(upNext.id)}>{mastered === 0 && !upNext.attempts ? "Open the first book" : "Open your next book"}<ArrowRight size={16} /></button>}
-            <Legend />
-          </div>
-        )}
+        {/* the card: beside the shelf, as tall as one shelf (not the whole stack), and it stays in view while the other shelves are scrolled */}
+        <div ref={cardRef} className="@container min-w-0 scroll-mt-24 lg:sticky lg:top-24" style={{ "--card-h": `${cardH}px` } as React.CSSProperties}>
+          {openRow ? (
+            <BookCard key={openRow.id} c={openRow} order={index + 1} total={rows.length} color={COLORS[index % COLORS.length]} language={language} out={open!.out}
+              requires={openRow.requires ?? []} onClose={() => putBack()} onGo={onJump} />
+          ) : (
+            <div className={`card rise flex ${CARD_H} flex-col justify-center overflow-hidden px-7 py-5`}>
+              <p className="eyebrow mb-2">Track {track.order}</p>
+              <h4 className="display text-[26px]">Pick a book</h4>
+              <p className="mt-2 max-w-[56ch] text-[14px] leading-snug text-label2">Click a book on the shelf to turn it around: you will see its cover, what is inside and where you stand. Books fill with colour as you progress.</p>
+              {upNext && <button className="btn btn-primary mt-4 self-start" onClick={() => pick(upNext.id)}>{mastered === 0 && !upNext.attempts ? "Open the first book" : "Open your next book"}<ArrowRight size={16} /></button>}
+              <Legend />
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -209,8 +253,8 @@ function Legend() {
  * One book standing on the shelf: a spine, coloured in from the bottom as far as your progress. Opening it turns the book around
  * (the spine swings away while the cover swings in) and the neighbours slide apart to make room.
  */
-function Book({ c, n, total, color, trackTitle, leanOn, open, onPick, onKeyDown }: {
-  c: ConceptRow; n: number; total: number; color: string; trackTitle: string; leanOn?: number; open: boolean; onPick: () => void; onKeyDown: (e: React.KeyboardEvent) => void;
+function Book({ c, n, total, color, trackTitle, leanOn, open, href, onPick, onKeyDown }: {
+  c: ConceptRow; href: string; n: number; total: number; color: string; trackTitle: string; leanOn?: number; open: boolean; onPick: () => void; onKeyDown: (e: React.KeyboardEvent) => void;
 }) {
   const p = fillOf(c);
   const h = hash(c.id);
@@ -249,89 +293,63 @@ function Book({ c, n, total, color, trackTitle, leanOn, open, onPick, onKeyDown 
           <span className="book-front-inner"><BookCover id={c.id} title={c.title} kicker={c.group ? `${trackTitle} · ${c.group}` : trackTitle} order={n} total={total} color={color} status={status} /></span>
         </span>
       </button>
+      {/* a link on the cover itself: takes the reader straight into the book (kept beside the button, not inside it) */}
+      <Link href={href} className="book-open-link" tabIndex={open ? 0 : -1} aria-hidden={!open} title={`Open ${c.title}`} onClick={(e) => e.stopPropagation()}>
+        Open<ArrowUpRight size={12} strokeWidth={2.6} aria-hidden />
+      </Link>
     </li>
   );
 }
 
-function BookCard({ c, order, total, color, language, out, history, requires, onClose, onGo }: {
-  c: ConceptRow; order: number; total: number; color: string; language: LangId; out: boolean; history?: HistoryRow[];
+function BookCard({ c, order, total, color, language, out, requires, onClose, onGo }: {
+  c: ConceptRow; order: number; total: number; color: string; language: LangId; out: boolean;
   requires: { id: string; title: string }[]; onClose: () => void; onGo: (id: string) => void;
 }) {
   const cta = c.inProgress ? "Continue challenge" : c.attempts > 0 ? "Next challenge" : "Start challenge";
-  const recent = (history ?? []).slice(0, 2);
-  const when = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const pct = pctOf(c);
   return (
-    <div className={`card relative flex flex-col overflow-hidden transition-[opacity,transform] duration-300 ${out ? "translate-y-2 opacity-0" : "book-card-in"}`}>
+    <div className={`card relative flex ${CARD_H} flex-col overflow-hidden transition-[opacity,transform] duration-300 ${out ? "translate-y-2 opacity-0" : "book-card-in"}`}>
       <span aria-hidden className="h-1 shrink-0" style={{ background: color }} />
       <button className="btn btn-icon btn-sm btn-ghost absolute right-2.5 top-3.5 z-[2]" onClick={onClose} aria-label="Close and put the book back"><X size={17} /></button>
 
-      <div className="grid min-h-0 flex-1 content-start gap-x-6 gap-y-3 overflow-auto px-5 pb-3 pt-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
-        {/* what it is */}
-        <div className="min-w-0">
-          <div className="flex items-center gap-3 pr-8 md:pr-0">
-            <ConceptIcon symbol={c.symbol} size={38} />
-            <div className="min-w-0">
-              <p className="eyebrow truncate">Book {order} of {total}{c.group ? ` · ${c.group}` : ""}</p>
-              <h4 className="display mt-1 text-[25px]">{c.title}</h4>
-            </div>
+      {/* the same size as the "Pick a book" card: the essentials, nothing more */}
+      <div className="flex min-h-0 flex-1 flex-col justify-center gap-2.5 overflow-auto px-5 pb-2.5 pt-3.5">
+        <div className="flex items-center gap-3 pr-8">
+          <ConceptIcon symbol={c.symbol} size={38} />
+          <div className="min-w-0">
+            <p className="eyebrow truncate">Book {order} of {total}{c.group ? ` · ${c.group}` : ""}</p>
+            <h4 className="display mt-0.5 truncate text-[24px]">{c.title}</h4>
           </div>
-          <p className="mt-3 text-[14px] leading-snug text-label2">{c.summary}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {!c.practice ? <span className="chip"><BookOpen size={12} />Lesson · practice coming soon</span>
-              : <>
-                {c.mastered && <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>}
-                {c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
-                  : !c.mastered && (c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Clean passes {c.streak}/{c.streakGoal ?? 3}</span> : <span className="chip">Not started</span>)}
-              </>}
-          </div>
-          {requires.length > 0 && (
-            <div className="mt-3">
-              <p className="eyebrow mb-1.5">Builds on</p>
-              <div className="flex flex-wrap gap-1.5">
-                {requires.map((r) => <button key={r.id} className="chip hover:brightness-95" onClick={() => onGo(r.id)} title="Take that book out of its pile">{r.title}</button>)}
-              </div>
-            </div>
-          )}
+        </div>
+        <p className="line-clamp-2 text-[13.5px] leading-snug text-label2">{c.summary}</p>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {!c.practice ? <span className="chip"><BookOpen size={12} />Lesson · practice coming soon</span>
+            : <>
+              {c.mastered && <span className="chip chip-ok"><CheckCircle2 size={12} />Mastered</span>}
+              {c.inProgress ? <span className="chip chip-warn"><Play size={10} />In progress</span>
+                : !c.mastered && (c.attempts > 0 ? <span className="chip chip-accent"><Flame size={12} />Clean passes {c.streak}/{c.streakGoal ?? 3}</span> : <span className="chip">Not started</span>)}
+            </>}
+          {requires.length > 0 && <span className="ml-1 text-[11.5px] font-semibold uppercase tracking-wider text-label3">Builds on</span>}
+          {requires.map((r) => <button key={r.id} className="chip hover:brightness-95" onClick={() => onGo(r.id)} title="Take that book out of its pile">{r.title}</button>)}
         </div>
 
-        {/* where you stand */}
-        <div className="min-w-0 space-y-2.5 md:pt-8">
-          {c.practice ? (
-            <div className="flex items-center gap-4 rounded-2xl border border-sep bg-card2 px-3.5 py-3">
-              <Ring value={pct / 100} size={64} stroke={7} mastered={c.mastered} label={false} />
-              <dl className="grid flex-1 grid-cols-3 gap-2 text-center">
-                <div><dt className="eyebrow !tracking-wider" title="How close you are to mastery, by streak or score, whichever is closer">To mastery</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{pct}%</dd></div>
-                <div><dt className="eyebrow !tracking-wider">Tries</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.attempts}</dd></div>
-                <div><dt className="eyebrow !tracking-wider" title="Passes in a row with no hints and no resubmits">Clean passes</dt><dd className="mt-0.5 text-[19px] font-bold tabular-nums">{c.streak}/{c.streakGoal ?? 3}</dd></div>
-              </dl>
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-sep bg-card2 p-3.5 text-[13px] leading-snug text-label2">Read the lesson now. Challenges for this book are on the way.</p>
-          )}
-          {c.practice && !c.mastered && (
-            <p className="text-[12px] leading-snug text-label3">
-              Master it with {c.streakGoal ?? 3} clean passes in a row (no hints), or by reaching {Math.round((c.scoreGoal ?? 0.85) * 100)}% with solid passes on hard challenges. Hints are fine; they just slow the score.
-            </p>
-          )}
-          {recent.length > 0 && (
-            <div>
-              <p className="eyebrow mb-1">Recent tries</p>
-              <ul className="divide-y divide-[var(--sep)] rounded-xl border border-sep">
-                {recent.map((h, i) => (
-                  <li key={i} className="flex items-center gap-3 px-3 py-1.5 text-[12.5px]">
-                    <span className="min-w-0 flex-1 truncate font-medium" title={h.title}>{h.title}</span>
-                    <span className="shrink-0 text-xs text-label3">{h.passed}/{h.total} · {when(h.at)}</span>
-                    <span className={`w-8 shrink-0 text-right font-semibold tabular-nums ${h.delta >= 0 ? "text-ok" : "text-bad"}`}>{h.delta >= 0 ? "+" : ""}{Math.round(h.delta * 100)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
+        {c.practice ? (
+          <div className="flex items-center gap-4 rounded-2xl border border-sep bg-card2 px-3.5 py-2.5"
+            title={c.mastered ? undefined : `Master it with ${c.streakGoal ?? 3} clean passes in a row (no hints), or by reaching ${Math.round((c.scoreGoal ?? 0.85) * 100)}% with solid passes on hard challenges.`}>
+            <Ring value={pct / 100} size={50} stroke={6} mastered={c.mastered} label={false} />
+            <dl className="grid flex-1 grid-cols-3 gap-2 text-center">
+              <div><dt className="eyebrow !tracking-wider">To mastery</dt><dd className="mt-0.5 text-[18px] font-bold tabular-nums">{pct}%</dd></div>
+              <div><dt className="eyebrow !tracking-wider">Tries</dt><dd className="mt-0.5 text-[18px] font-bold tabular-nums">{c.attempts}</dd></div>
+              <div><dt className="eyebrow !tracking-wider">Clean passes</dt><dd className="mt-0.5 text-[18px] font-bold tabular-nums">{c.streak}/{c.streakGoal ?? 3}</dd></div>
+            </dl>
+          </div>
+        ) : (
+          <p className="rounded-2xl border border-sep bg-card2 p-3 text-[13px] leading-snug text-label2">Read the lesson now. Challenges for this book are on the way.</p>
+        )}
       </div>
 
-      <div className="flex shrink-0 flex-wrap gap-2.5 border-t border-sep bg-card2 px-5 py-3">
+      <div className="flex shrink-0 flex-wrap gap-2.5 border-t border-sep bg-card2 px-5 py-2.5">
         <Link href={`/learn/${c.id}?lang=${language}`} className={`btn btn-sm ${c.practice ? "btn-secondary" : "btn-primary"}`}><BookOpen size={15} />Read the lesson</Link>
         {c.practice && (c.available
           ? <Link href={`/learn/${c.id}/practice?lang=${language}`} className="btn btn-sm btn-primary">{cta}<ArrowRight size={15} /></Link>

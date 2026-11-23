@@ -351,6 +351,15 @@ body {
 .book-slot.is-open .book-front { transform: none; opacity: 1; pointer-events: auto; }
 /* the cover is drawn at full size and shrunk to the height of the book */
 .book-front-inner { position: absolute; left: 0; bottom: 0; width: 170px; height: 256px; transform: scale(var(--s)); transform-origin: 0 100%; }
+/* the "Open" link on an open book's cover: it fades in once the cover has turned, and goes at once when the book starts to close */
+.book-open-link {
+  position: absolute; top: 3px; right: 6px; z-index: 3; display: inline-flex; align-items: center; gap: 2px; height: 17px; padding: 0 6px 0 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.01em; color: #fff; background: rgba(104, 104, 112, 0.82); backdrop-filter: blur(4px); border: 1px solid rgba(255, 255, 255, 0.3);
+  opacity: 0; pointer-events: none; transform: translateY(-3px); transition: opacity 0.12s ease, transform 0.12s ease, background 0.15s ease;
+}
+.book-slot.is-open .book-open-link { opacity: 1; pointer-events: auto; transform: none; transition: opacity 0.25s ease 0.5s, transform 0.25s ease 0.5s, background 0.15s ease; }
+.book-open-link:hover { background: rgba(84, 84, 92, 0.95); }
+.book-open-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .book-slot.is-open .book:focus-visible .book-front { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 .book-sheen { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0, 0, 0, 0.1) 0, rgba(255, 255, 255, 0.24) 15%, rgba(255, 255, 255, 0.05) 42%, rgba(0, 0, 0, 0) 56%, rgba(0, 0, 0, 0.22) 100%); }
 .book-meter { position: absolute; left: 0; bottom: 0; width: 4px; background: currentColor; opacity: 0.55; }
