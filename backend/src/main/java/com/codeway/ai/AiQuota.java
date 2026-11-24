@@ -57,6 +57,14 @@ public class AiQuota {
         return userId == null || perUser <= 0 || used.getOrDefault(userId, 0) + calls <= perUser;
     }
 
+    /** Whether today's allowance is used up for this user or for the whole app: new AI work is refused, which callers should say plainly. */
+    public synchronized boolean exhausted(Long userId) {
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+        if (!today.equals(day)) return false;
+        if (global > 0 && globalUsed >= global) return true;
+        return userId != null && perUser > 0 && used.getOrDefault(userId, 0) >= perUser;
+    }
+
     public synchronized Map<String, Integer> snapshot(Long userId) {
         return Map.of("userUsed", userId == null ? 0 : used.getOrDefault(userId, 0), "userLimit", perUser,
                 "globalUsed", globalUsed, "globalLimit", global);

@@ -33,4 +33,16 @@ class AiQuotaTest {
         var q = new AiQuota(0, 0, new MutableClock());
         for (int i = 0; i < 1000; i++) assertTrue(q.tryAcquire(1L));
     }
+
+    @Test void exhaustedSaysWhenTodaysAllowanceIsUsedUp() {
+        var clock = new MutableClock();
+        var q = new AiQuota(2, 100, clock);
+        assertFalse(q.exhausted(1L));
+        q.tryAcquire(1L); q.tryAcquire(1L);
+        assertTrue(q.exhausted(1L), "user 1 has used both");
+        assertFalse(q.exhausted(2L), "user 2 still has theirs");
+        clock.now = Instant.parse("2026-11-12T00:00:01Z");
+        assertFalse(q.exhausted(1L), "a new UTC day gives it back");
+        assertFalse(new AiQuota(0, 0, clock).exhausted(1L), "no cap, never exhausted");
+    }
 }

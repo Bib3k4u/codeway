@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Check, Eye, Pencil, RotateCcw, ChevronDown, ChevronLeft, FileCode2, Lightbulb, Loader2, Lock, Maximize2, Minimize2, PanelLeft, Play, Plus, Send, TestTube2, TextCursorInput, Trash2, XCircle, Trophy, Terminal } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import Markdown from "@/components/Markdown";
+import CoffeeLoader from "@/components/CoffeeLoader";
 import Ring from "@/components/Ring";
 import Splitter from "@/components/Splitter";
 import Confetti from "@/components/Confetti";
@@ -73,7 +74,6 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   const { refresh: refreshConcepts } = useConcepts();
   const [start, setStart] = useState<StartResp | null>(null);
   const [error, setError] = useState("");
-  const [waited, setWaited] = useState(0);        // seconds spent waiting for a new challenge to be made
   const [files, setFiles] = useState<Files>({});
   // The editor can be split into up to three columns, each with its own open files; `drag` is the file being dragged right now.
   const [groups, setGroups] = useState<Group[]>([{ id: 1, open: [], active: "" }]);
@@ -266,7 +266,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
         mastery: { score: 0, streak: 0, mastered: false, streakGoal: 3, attempts: 0 },
         };
       })
-      : redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : startChallenge(lang, concept, setWaited, () => started.current !== startKey);
+      : redo && startKey === 0 ? api<StartResp>(`/challenges/${redo}/redo`, {}) : startChallenge(lang, concept, undefined, () => started.current !== startKey);
     req
       .then((r) => {
         resetEditorModels();
@@ -449,7 +449,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
 
   const endParty = useCallback(() => setParty(false), []);
   const diagnostics = live ?? run?.diagnostics ?? [];
-  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setQuiz(null); setError(""); setWaited(0); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
+  const nextChallenge = () => { setParty(false); setSheet(null); setResult(null); setRun(null); setTestRun(null); setHints([]); setHintNote(""); setStart(null); setQuiz(null); setError(""); saved.current = null; setRestored(false); setStartKey((k) => k + 1); };
   const fileNames = useMemo(() => Object.keys(files).sort(), [files]);
   const passing = testRun?.tests.filter((t) => t.passed).length ?? 0;
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -482,14 +482,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   if (!start) {
     return (
       <AppShell>
-        <div className="mx-auto mt-24 max-w-sm text-center rise">
-          <Loader2 className="mx-auto mb-5 animate-spin text-accent" size={30} />
-          <h1 className="mb-1 text-xl font-semibold tracking-tight">Preparing your challenge</h1>
-          <p className="text-sm text-label2">
-            {waited < 6 ? "Choosing one that matches your level." : "Writing a new challenge for your level and testing it before you see it. This usually takes under a minute."}
-          </p>
-          {waited >= 6 && <p className="mt-2 text-xs tabular-nums text-label3">{waited}s</p>}
-        </div>
+        <CoffeeLoader />
       </AppShell>
     );
   }

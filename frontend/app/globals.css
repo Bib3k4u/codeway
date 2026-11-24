@@ -396,3 +396,70 @@ body {
 
 /* project search: matches marked in the editor */
 .cw-find-match { background: rgba(246, 220, 60, 0.38); border-radius: 2px; box-shadow: 0 0 0 1px rgba(180, 140, 0, 0.45); }
+
+/* ---- Coffee loader (shown while a challenge is being written) ---- */
+.cl-root { animation: cl-appear 0.5s ease 0.25s both; }
+@keyframes cl-appear { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.cl-stage { position: relative; width: min(380px, 88vw); aspect-ratio: 360 / 320; margin: 0 auto; }
+.cl-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.cl-over { pointer-events: none; }
+.cl-hit { cursor: pointer; outline: none; }
+.cl-hit:focus-visible { filter: drop-shadow(0 0 6px var(--accent-fill)); }
+.cl-meter { background: var(--accent-fill); transition: width 0.6s linear; }
+.cl-level { transition: transform 0.6s linear; }
+.cl-fade { display: inline-grid; }
+.cl-fade > span { grid-area: 1 / 1; }
+.cl-in { animation: cl-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.cl-out { animation: cl-out 0.45s ease forwards; pointer-events: none; }
+@keyframes cl-in { from { opacity: 0; transform: translateY(7px); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes cl-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-7px); filter: blur(3px); } }
+.cl-kettle { transform: rotate(22deg); }
+.cl-ripple, .cl-steam, .cl-splash { transform-box: fill-box; transform-origin: 50% 50%; }
+@media (prefers-reduced-motion: no-preference) {
+  /* the kettle rocks a little about its spout, slowly and with ease; clicking it makes the pour livelier for a moment */
+  .cl-kettle { animation: cl-tip 4.6s ease-in-out infinite alternate; }
+  .cl-stage.is-fast .cl-kettle { animation-duration: 1.3s; }
+  @keyframes cl-tip { from { transform: rotate(19deg); } to { transform: rotate(26deg); } }
+  /* the pour: it breathes in width, a glint runs down it, drops jump where it lands and rings spread over the coffee */
+  .cl-stream { animation: cl-width 1.7s ease-in-out infinite alternate; }
+  @keyframes cl-width { from { stroke-width: 4.7; } to { stroke-width: 6.2; } }
+  .cl-glint { animation: cl-glint 1.5s linear infinite; }
+  @keyframes cl-glint { from { stroke-dashoffset: 26; } to { stroke-dashoffset: 0; } }
+  .cl-splash { animation: cl-splash 1.4s cubic-bezier(0.25, 0.6, 0.45, 1) infinite; opacity: 0; }
+  @keyframes cl-splash {
+    0% { transform: translate(0, 0) scale(0.5); opacity: 0; }
+    12% { opacity: 1; }
+    50% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 1; }
+    100% { transform: translate(calc(var(--dx) * 1.5), 2px) scale(0.4); opacity: 0; }
+  }
+  .cl-ripple { animation: cl-ripple 2.6s ease-out infinite; opacity: 0; }
+  .cl-ripple-b { animation-delay: 1.3s; }
+  @keyframes cl-ripple { 0% { transform: scale(0.15); opacity: 0.85; } 100% { transform: scale(2.1); opacity: 0; } }
+  /* steam: soft columns that drift up, sway and thin out */
+  .cl-steam { animation: cl-steam 4.8s ease-in-out infinite; opacity: 0; }
+  .cl-steam-s { animation-duration: 5.6s; animation-delay: 1.4s; }
+  @keyframes cl-steam {
+    0% { transform: translate(0, 10px) scaleX(0.9); opacity: 0; }
+    30% { opacity: 0.55; }
+    60% { transform: translate(3px, -10px) scaleX(1.1); }
+    100% { transform: translate(-2px, -30px) scaleX(0.95); opacity: 0; }
+  }
+  .cl-wiggle { transform-origin: 222px 282px; animation: cl-wiggle 0.7s cubic-bezier(0.3, 0.6, 0.3, 1); }
+  @keyframes cl-wiggle { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-2.4deg); } 45% { transform: rotate(1.9deg); } 70% { transform: rotate(-1deg); } }
+  .cl-puff { animation: cl-puff 1.8s ease-out forwards; }
+  @keyframes cl-puff { from { transform: translate(0, 0) scale(0.4); opacity: 0.75; } to { transform: translate(var(--dx), -64px) scale(1.8); opacity: 0; } }
+  /* beans tossed from the pile: they hop up and land again */
+  .cl-hop { animation: cl-hop 1.8s cubic-bezier(0.3, 0.1, 0.55, 1) both; }
+  @keyframes cl-hop {
+    0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+    38% { transform: translate(calc(var(--dx) * 0.6), -64px) rotate(calc(var(--r) * 0.5)); opacity: 1; }
+    72% { transform: translate(var(--dx), 2px) rotate(var(--r)); opacity: 1; }
+    84% { transform: translate(var(--dx), -7px) rotate(var(--r)); opacity: 1; }
+    100% { transform: translate(var(--dx), 2px) rotate(var(--r)); opacity: 0; }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-puff, .cl-hop, .cl-splash, .cl-ripple { display: none; }
+  .cl-steam { opacity: 0.35; }
+  .cl-root { animation: none; }
+}

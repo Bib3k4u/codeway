@@ -124,8 +124,9 @@ public class ChallengeService {
         if (pickUnseen.isPresent()) return pickUnseen.get();
         return bank.stream()
                 .min(Comparator.comparingLong((Challenge c) -> lastSeen.getOrDefault(c.id, 0L)).thenComparing(nearest))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "We couldn't prepare a challenge just now. Please try again in a minute, or pick another concept."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ai != null && ai.quotaExhausted(userId)
+                        ? "Today's allowance for writing new challenges is used up, and none are stored for this concept yet. Pick a concept that already has challenges, or come back tomorrow."
+                        : "We couldn't prepare a challenge just now. Please try again in a minute, or pick another concept."));
     }
 
     // ---- making challenges in the background ----
@@ -260,6 +261,8 @@ public class ChallengeService {
         return null;
     }
 
+    /** A method signature (the description is meant to give those): modifiers, a type, a name and a parameter list, no body statement. */
+    private static final Pattern SIGNATURE = Pattern.compile("^(?!return\\b|throw\\b|new\\b)(?:(?:public|private|protected|static|abstract|default|final|synchronized)\\s+)*[\\w<>\\[\\],.? ]+\\s+\\w+\\s*\\([^)]*\\)\\s*(?:throws\\s+[\\w, .]+)?\\s*[;{]?$");
     private static final Pattern STATEMENT = Pattern.compile("(?i)(print|println|printf|console\\.log|cout|console\\.write|string\\.format|return\\s|throw\\s|raise\\s)");
 
     /**
@@ -272,14 +275,12 @@ public class ChallengeService {
         Map<String, String> ref = Json.files(ch.referenceSolutionJson);
 
         if ("HEAVY".equals(ch.scaffolding)) {
-            for (var e : starter.entrySet()) {
-                if (e.getKey().equals(lang.mainFile)) continue;
-                String code = stripComments(e.getValue(), lang).strip();
-                boolean declares = lang == Lang.PYTHON ? Pattern.compile("(?m)^\\s*(class|def)\\s").matcher(code).find()
-                        : Pattern.compile("\\b(class|interface|struct|enum|record)\\b").matcher(code).find();
-                if (!declares || !code.contains("("))
-                    return "HEAVY scaffolding: " + e.getKey() + " is only comments or an empty shell. Write out its class declaration, fields and every method header, with TODO comments inside the bodies";
-            }
+            // "Guided" means headers are written out. A new empty type for the learner to fill (an interface to create) is fine; what is not is a
+            // starter where no learner file has a single method or constructor written.
+            var learnerFiles = starter.entrySet().stream().filter(e -> !e.getKey().equals(lang.mainFile)).toList();
+            boolean anyHeader = learnerFiles.stream().anyMatch(e -> stripComments(e.getValue(), lang).contains("("));
+            if (!learnerFiles.isEmpty() && !anyHeader)
+                return "HEAVY scaffolding: no starter file has a method or constructor written out, only comments or empty shells. Write out the class declarations, fields and method headers, with TODO comments inside the bodies";
         }
 
         String reads = SOURCE_READ.matcher(String.join("\n", Json.files(ch.testsJson).values())).find() ? "x" : null;
@@ -295,7 +296,7 @@ public class ChallengeService {
             if (Boolean.TRUE.equals(ch.mainLocked) && e.getKey().equals(lang.mainFile)) continue;   // provided and shown, nothing to give away
             for (String line : e.getValue().split("\\R")) {
                 String l = squash(line);
-                if (l.length() < 24 || !l.contains("(") || !STATEMENT.matcher(l).find() || given.contains(l)) continue;
+                if (l.length() < 24 || !l.contains("(") || !STATEMENT.matcher(l).find() || given.contains(l) || SIGNATURE.matcher(l).matches()) continue;
                 if (brief.contains(l)) return "descriptionMd gives away a line of the solution: `" + l + "`. Describe what it must do and print in words instead; show only signatures and the expected output";
             }
         }
@@ -534,6 +535,11 @@ public class ChallengeService {
         Lang lang = Lang.of(ch.language);
         if (!tests.containsKey(lang.testFile)) return "tests must include " + lang.testFile;
         if (!ref.containsKey(lang.mainFile)) return "referenceSolution must include " + lang.mainFile;
+        String testSrc = tests.get(lang.testFile);
+        int declared = testSrc.split(Pattern.quote(lang.testCall), -1).length - 1;
+        if (declared < 3)
+            return "the test file has " + declared + " test(s) written as " + lang.testCall + "\"plain-words name\", ...). Every test must be wrapped like that, at least 3 of them: "
+                    + "a Check call made directly in main, outside " + lang.testCall + "...), records no test at all (and a failing one crashes the program)";
         if (Boolean.TRUE.equals(ch.mainLocked)) {
             String sm = starter.get(lang.mainFile);
             if (sm == null || sm.isBlank()) return "the provided " + lang.mainFile + " must be written out in starterFiles";
@@ -756,7 +762,8 @@ public class ChallengeService {
                     - Java 21, default package, no external libraries, no stdin, deterministic output (no randomness, no time).
                     - File names match [A-Za-z0-9_]+.java. One top-level public class per file, named like the file.
                     - tests has a single file TestMain.java with `public class TestMain { public static void main(String[] args) { ... } }`.
-                    - Each test is `Check.run("descriptive name", () -> { ... });`. At least 4 tests. A provided class Check offers:
+                    - Each test is `Check.run("descriptive name", () -> { ... });`. At least 4 tests. EVERY Check.eq / Check.isTrue / Check.throwsEx call goes INSIDE such a lambda: a call
+                      made directly in main records no test (the exercise then has zero tests) and, if it fails, crashes the whole program. A provided class Check offers:
                       Check.eq(Object expected, Object actual), Check.eq(double expected, double actual, double eps),
                       Check.isTrue(boolean cond, String message), Check.throwsEx(SomeException.class, () -> { ... }).
                       These are the ONLY Check methods that exist: do not call any other (no Check.capture, Check.fail, Check.notNull...). To capture System.out, use plain Java (ByteArrayOutputStream + System.setOut).

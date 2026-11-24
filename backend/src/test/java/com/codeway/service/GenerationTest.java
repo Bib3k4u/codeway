@@ -89,9 +89,15 @@ class GenerationTest {
         var c = challenge("HEAVY", Map.of("Car.java", SHELL), Map.of("Car.java", REF), "Write a Car.");
         String problem = service().quality(c);
         assertNotNull(problem);
-        assertTrue(problem.contains("Car.java"));
+        assertTrue(problem.contains("HEAVY"));
         assertNull(service().quality(challenge("HEAVY", Map.of("Car.java", FULL), Map.of("Car.java", REF), "Write describe().")));
         assertNull(service().quality(challenge("BLANK", Map.of("Car.java", SHELL), Map.of("Car.java", REF), "Write a Car.")), "only guided starters must come written out");
+    }
+
+    @Test void aGuidedStarterMayHaveAnEmptyTypeForTheLearnerToFillAsLongAsSomethingIsWrittenOut() {
+        // an interface the learner creates (empty) next to a class whose members are written: the shape the SOLID exercises have
+        var starter = Map.of("Car.java", FULL, "Describable.java", "public interface Describable {\n    // TODO: declare describe()\n}\n");
+        assertNull(service().quality(challenge("HEAVY", starter, Map.of("Car.java", REF), "Create the Describable interface.")));
     }
 
     @Test void aBriefThatPastesTheSolutionLineIsRejected() {
@@ -102,6 +108,14 @@ class GenerationTest {
         // describing it in words, and showing a signature or the expected output, is fine
         assertNull(service().quality(challenge("PARTIAL", Map.of("Car.java", FULL), Map.of("Car.java", REF),
                 "describe() returns the name in capitals between `Car: ` and `!`.\n\n```\npublic String describe()\n```\nExample output: Car: AUDI!")));
+    }
+
+    @Test void aMethodSignatureInTheBriefIsNotALeakEvenIfItMentionsPrint() {
+        String ref = "public interface Printer {\n    void print(String document);\n}\n";
+        assertNull(service().quality(challenge("PARTIAL", Map.of("Car.java", FULL), Map.of("Printer.java", ref), "Declare `void print(String document);` in Printer.")));
+        // but a statement that prints is still one
+        String statement = "public class Report {\n    public void show(String name) {\n        System.out.println(\"Report: \" + name);\n    }\n}\n";
+        assertNotNull(service().quality(challenge("PARTIAL", Map.of("Car.java", FULL), Map.of("Report.java", statement), "Call `System.out.println(\"Report: \" + name);` inside show.")));
     }
 
     @Test void aLineTheStarterAlreadyHasIsNotALeak() {
@@ -136,6 +150,15 @@ class GenerationTest {
         assertTrue(problem.contains("read source files"));
         c.testsJson = Json.write(Map.of("TestMain.java", "Check.run(\"describes\", () -> Check.equals(\"Car: AUDI!\", new Car(\"audi\").describe()));"));
         assertNull(service().quality(c));
+    }
+
+    @Test void testsWrittenDirectlyInMainAreRejectedWithAMessageThatSaysWhy() {
+        var c = challenge("PARTIAL", Map.of("Car.java", FULL), Map.of("Car.java", REF, "Main.java", "public class Main { public static void main(String[] a) {} }"), "Write describe().");
+        c.testsJson = Json.write(Map.of("TestMain.java", "public class TestMain { public static void main(String[] a) {\n  Check.isTrue(new Car(\"a\") instanceof Car, \"x\");\n  Check.eq(\"Car: A!\", new Car(\"a\").describe());\n } }"));
+        String problem = service().validate(c);
+        assertNotNull(problem);
+        assertTrue(problem.contains("0 test(s)") && problem.contains("Check.run("), problem);
+        assertTrue(problem.contains("directly in main"));
     }
 
     // ---- compiler errors in the hidden tests ----

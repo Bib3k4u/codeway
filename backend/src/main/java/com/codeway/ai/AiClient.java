@@ -32,6 +32,8 @@ public class AiClient {
         return !apiKey.isBlank() && !model.isBlank() && (!apiVersion.isBlank() ? !endpoint.isBlank() : true);
     }
 
+    public boolean quotaExhausted(Long userId) { return quota.exhausted(userId); }
+
     public boolean hasHeadroom(Long userId, int calls) { return quota.hasHeadroom(userId, calls); }
 
     public String model() { return model; }
