@@ -66,6 +66,25 @@ public class SeedPatterns implements ApplicationRunner {
                 System.err.println("[seed-pattern] " + c.title + " failed: " + e.getMessage());
             }
         }
+        try { retireRemoved(all); } catch (Exception e) { System.err.println("[seed-pattern] could not retire removed scenarios: " + e.getMessage()); }
+    }
+
+    /**
+     * A scenario that was removed or replaced (a different title) must stop being served: it is retired, together with the copies
+     * translated from it. The learner's earlier attempts on it stay, and an unfinished one can still be resumed.
+     */
+    void retireRemoved(List<Challenge> current) {
+        Set<String> keep = new HashSet<>();
+        for (Challenge c : current) keep.add(c.title + "|" + c.language);
+        List<Challenge> everything = repo.findAll();
+        Set<Long> gone = new HashSet<>();
+        for (Challenge c : everything)
+            if (ORIGIN.equals(c.origin) && c.validated && !keep.contains(c.title + "|" + c.language)) {
+                c.validated = false; repo.save(c); gone.add(c.id);
+                System.out.println("[seed-pattern] retired " + c.title + " (" + c.language + "): it is no longer in the scenarios");
+            }
+        for (Challenge c : everything)
+            if (c.validated && c.familyId != null && gone.contains(c.familyId)) { c.validated = false; repo.save(c); }
     }
 
     /** Reads every scenario (or just {@code onlyId}) for every language that has files. Not validated. */

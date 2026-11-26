@@ -148,6 +148,13 @@ final class GuidedPrompts {
                   (the options and the answer are added for you); the question asks which principle the code breaks most clearly, and the explanation says why,
                   pointing at the classes or lines. guide.reveal: {"pattern","principle","roles":[{"name","is"}],"summary"} where roles map the pattern's roles to the
                   learner's classes, and summary is 2 or 3 sentences including when NOT to use it.
+                - Write for a BEGINNER who has just met classes and objects. Keep it small: at most 4 classes besides the main file, about 50 lines of code in all,
+                  an everyday domain, everyday words (no jargon such as "idempotent", "decouple" or "abstraction layer"). Prefer 3 steps over 4.
+                - Each step's md is short (under 110 words): one plain sentence on what to do and why, the exact names to use, and a small fenced code skeleton whose
+                  gaps are comments (the learner fills the gaps; never give the finished lines). Finish with "Press **Check step N**".
+                - Tests must be easy to understand when they fail: use Check.isTrue with a message in plain words that says what is wrong and which class to look at;
+                  keep Check.eq for small numbers. Prefer counts RELATIVE to a starting value over any reset helper, so the exercise has no methods that exist only
+                  for testing. Test names are short plain sentences. Use about 3 Guard tests and 2 or 3 tests per step.
                 - hints: 3 strings: a guiding question, the key idea without naming the pattern, a partial snippet.
                 - descriptionMd (at least 120 words): the story, what must keep working, what the learner will do at a high level, "## Example" with the exact
                   output of the main file, and "Format:" notes on how it prints.

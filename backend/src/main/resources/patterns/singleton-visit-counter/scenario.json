@@ -1,0 +1,42 @@
+{
+  "id": "singleton-visit-counter",
+  "concept": "singleton",
+  "title": "One visit counter for the whole website",
+  "difficulty": 1,
+  "scaffolding": "HEAVY",
+  "expectedMinutes": 15,
+  "hints": [
+    "How many VisitCounter objects exist while the website runs? How many should there be, so that every page adds to the same total?",
+    "Let the VisitCounter class itself keep the one counter and hand it out to anybody who asks. Nobody else should be allowed to build another one.",
+    "private static VisitCounter instance;\npublic static VisitCounter getInstance() {\n    if (instance == null) {\n        // create it here\n    }\n    return instance;\n}"
+  ],
+  "guide": {
+    "quiz": {
+      "question": "Look at how HomePage and AboutPage get their VisitCounter. Which principle does this code break most clearly?",
+      "explanation": "Each page runs `new VisitCounter()` itself, so every page decides how many counters exist. Nobody is in charge of \"there should only be one\": that job is scattered over the pages, which is Single Responsibility, and the pages also depend on how a counter gets built instead of being handed the one they should use, which is Dependency Inversion. Either answer is accepted. The visible damage: Home counts its own visits, About counts its own, and nobody can say how many visits the website really had."
+    },
+    "steps": [
+      {
+        "title": "Keep one counter inside VisitCounter",
+        "md": "Right now anybody can write `new VisitCounter()` and get a brand-new counter. First, let `VisitCounter` keep **one** counter and hand it out.\n\nOpen `VisitCounter.java` and write this (the two comments tell you what goes in the gap):\n\n```java\nprivate static VisitCounter instance;   // the one shared counter\n\npublic static VisitCounter getInstance() {\n    // 1. if instance is still null, create it with new VisitCounter()\n    // 2. return instance\n}\n```\n\n`static` means the field belongs to the class itself, not to one object, so everybody sees the same `instance`. Leave `HomePage` and `AboutPage` alone for now, then press **Check step 1**."
+      },
+      {
+        "title": "Use the shared counter in both pages",
+        "md": "Now make the pages use it. In `HomePage.java` and in `AboutPage.java`, find the line that says `new VisitCounter()` and replace it with `VisitCounter.getInstance()`.\n\nThat is the only change. After it, Home and About add to the same counter, so both can tell the real total. Press **Check step 2**."
+      },
+      {
+        "title": "Stop anyone from making another counter",
+        "md": "As long as `new VisitCounter()` is allowed, somebody can still make a second counter by accident. Close that door: add a **private constructor** to `VisitCounter.java`.\n\n```java\nprivate VisitCounter() { }\n```\n\nNow only `VisitCounter` itself can create a counter, and everybody else has to ask `getInstance()`. The pages already do, so nothing else changes. Press **Check step 3**. When all three steps pass, press **Submit** to see what you built."
+      }
+    ],
+    "reveal": {
+      "pattern": "Singleton",
+      "principle": "Single Responsibility",
+      "roles": [
+        { "name": "Singleton (the one shared object)", "is": "VisitCounter, with its private constructor, the static instance field and getInstance()" },
+        { "name": "Clients (the users of the shared object)", "is": "HomePage, AboutPage, and the ContactPage that the tests define" }
+      ],
+      "summary": "Singleton makes sure a class has exactly one object and gives everybody the same way to reach it, so every page adds to one shared counter instead of keeping a private one. Do not use it by reflex: it is hidden global state that any class can change from anywhere, and tests that depend on it can affect each other. When only a few classes need the object, prefer creating it once and passing it to them, so the dependency is visible."
+    }
+  }
+}
