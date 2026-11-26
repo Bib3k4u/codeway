@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Check, ChevronRight, Loader2, Lock, Search, TriangleAlert } from "lucide-react";
+import { Check, ChevronRight, Circle, Loader2, Lock, Play, Search, TriangleAlert, X } from "lucide-react";
 import Markdown from "@/components/Markdown";
 import type { Guide, QuizState, TestResult } from "@/lib/api";
 
@@ -27,11 +27,17 @@ export function stepStatus(guide: Guide, names: string[], tests: TestResult[] | 
  * The guided flow for design-pattern practice: first "which principle does this code break?", then small
  * refactoring steps that each have their own tests. The pattern is not named here; that happens in the result.
  */
-export default function GuidePanel({ guide, names, tests, onAnswer }: {
+export default function GuidePanel({ guide, names, tests, onAnswer, onCheck, checking = false }: {
   guide: Guide; names: string[]; tests: TestResult[] | undefined; onAnswer: (option: string) => Promise<QuizState>;
+  /** run the tests (the steps open from their results) */ onCheck?: () => void; checking?: boolean;
 }) {
   const quiz = guide.quiz;
   const st = stepStatus(guide, names, tests);
+  /** The tests of one step, by name (without the "S1:" prefix), with how each did in the last run. */
+  const stepTests = (k: number) => names.flatMap((name, i) => {
+    const m = STEP.exec(name);
+    return m && Number(m[1]) - 1 === k ? [{ label: name.replace(STEP, "").trim(), t: tests?.[i] }] : [];
+  });
   return (
     <div className="space-y-5">
       <Diagnose quiz={quiz} onAnswer={onAnswer} />
@@ -41,6 +47,11 @@ export default function GuidePanel({ guide, names, tests, onAnswer }: {
           {quiz.solved && st.ran && <span className="text-[12px] tabular-nums text-label3">{st.done.filter(Boolean).length}/{guide.steps.length} done</span>}
         </div>
         {!quiz.solved && <p className="mb-3 flex items-center gap-2 text-[13px] text-label3"><Lock size={13} />Answer the question above to unlock the editor and the steps.</p>}
+        {quiz.solved && st.current < guide.steps.length && (
+          <p className="mb-3 text-[13px] leading-snug text-label2">
+            Work one step at a time. When the code for a step is written, press <b className="font-semibold text-label">Check step</b>: the next step opens as soon as every check of this one passes. Run only shows what your program prints; it does not open steps.
+          </p>
+        )}
         {quiz.solved && st.guardFailing > 0 && (
           <p role="status" className="mb-3 flex items-start gap-2 rounded-xl px-3.5 py-2.5 text-[13px] leading-snug text-warn" style={{ background: "var(--orange-soft)" }}>
             <TriangleAlert size={15} className="mt-0.5 shrink-0" />
@@ -61,6 +72,30 @@ export default function GuidePanel({ guide, names, tests, onAnswer }: {
                   {done && <span className="text-[12px] font-medium text-ok">Done</span>}
                 </div>
                 {current && <div className="mt-2.5 pl-[34px]"><Markdown compact>{s.md}</Markdown></div>}
+                {current && (
+                  <div className="mt-3 pl-[34px]">
+                    <p className="eyebrow mb-1.5">This step is checked by</p>
+                    <ul className="space-y-1.5">
+                      {stepTests(k).map(({ label, t }, i) => (
+                        <li key={i} className="flex items-start gap-2 text-[13px] leading-snug">
+                          {!st.ran || !t ? <Circle size={13} className="mt-[3px] shrink-0 text-label3" /> : t.passed ? <Check size={13} strokeWidth={3} className="mt-[3px] shrink-0 text-ok" /> : <X size={13} strokeWidth={3} className="mt-[3px] shrink-0 text-bad" />}
+                          <span className={t && st.ran ? (t.passed ? "text-label2" : "text-label") : "text-label2"}>
+                            {label}
+                            {st.ran && t && !t.passed && t.message && <span className="mt-0.5 block text-[12px] text-bad">{t.message.length > 160 ? `${t.message.slice(0, 160)}…` : t.message}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {onCheck && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                        <button className="btn btn-primary btn-sm" onClick={onCheck} disabled={checking}>
+                          {checking ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}Check step {k + 1}
+                        </button>
+                        <span className="text-[12px] text-label3">{!st.ran ? "Not checked yet." : st.passed[k] === st.total[k] ? "Passing." : `${st.passed[k]} of ${st.total[k]} pass.`}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {done && !current && <button className="mt-1 pl-[34px] text-[12px] text-label3 hover:text-label" onClick={(e) => e.currentTarget.nextElementSibling?.classList.toggle("hidden")}>Show again</button>}
                 {done && !current && <div className="mt-2 hidden pl-[34px]"><Markdown compact>{s.md}</Markdown></div>}
               </li>
@@ -68,6 +103,7 @@ export default function GuidePanel({ guide, names, tests, onAnswer }: {
           })}
         </ol>
         {quiz.solved && st.current >= guide.steps.length && <p className="pop mt-3 text-[13.5px] font-medium text-ok">Every step passes. Submit to see what you built.</p>}
+        {quiz.solved && st.current < guide.steps.length && <p className="mt-3 text-[12.5px] leading-snug text-label3">Submit runs every step&apos;s checks at once. Finish all {guide.steps.length} steps first, or submit early to see what is still missing.</p>}
       </section>
     </div>
   );

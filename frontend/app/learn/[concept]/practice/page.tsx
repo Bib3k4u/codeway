@@ -21,7 +21,7 @@ import ExpectedOutput from "@/components/practice/ExpectedOutput";
 import TestPanel, { STEP_MS } from "@/components/practice/TestPanel";
 import ChallengeClock from "@/components/practice/ChallengeClock";
 import FloatingTip, { type Tip } from "@/components/FloatingTip";
-import GuidePanel from "@/components/practice/GuidePanel";
+import GuidePanel, { stepStatus } from "@/components/practice/GuidePanel";
 import FileSearch from "@/components/practice/FileSearch";
 import { resetEditorModels, type Highlight, type Reveal } from "@/components/CodeEditor";
 import { replaceAll, replaceOne, type Match } from "@/lib/search";
@@ -491,6 +491,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
   const providedFiles = ch.lockedFiles ?? [];
   const guide: Guide | null = start.guide ? { ...start.guide, quiz: quiz ?? start.guide.quiz } : null;
   const locked = !!guide && !guide.quiz.solved;
+  const stepsDone = !guide || stepStatus(guide, ch.testNames, testRun?.tests).current >= guide.steps.length;   // a guided exercise's output is the goal only at the end
   const crumb = (
     <div className="hidden items-center gap-2 text-sm text-label2 md:flex">
       <ChevronLeft size={14} />
@@ -527,7 +528,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
           )}
           <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
             {left === "steps" && guide ? (
-              <GuidePanel guide={guide} names={ch.testNames} tests={testRun?.tests} onAnswer={answerQuiz} />
+              <GuidePanel guide={guide} names={ch.testNames} tests={testRun?.tests} onAnswer={answerQuiz} onCheck={() => exec("tests")} checking={busy === "tests"} />
             ) : left === "brief" ? (
               <>
                 {ch.requires && ch.requires.length > 0 && (
@@ -541,6 +542,7 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                 <Markdown compact>{ch.descriptionMd}</Markdown>
                 {ch.sampleOutput && (
                   <section className="mt-6">
+                    {guide && <p className="mb-2 text-[12.5px] leading-snug text-label3">This is what the finished program prints, after the last step. You get there one step at a time.</p>}
                     <ExpectedOutput expected={ch.sampleOutput} />
                   </section>
                 )}
@@ -795,7 +797,12 @@ function Workspace({ concept, lang, redo, view }: { concept: string; lang: LangI
                         ))}
                       </div>
                     )}
-                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && !stdin.trim() && <ExpectedOutput expected={ch.sampleOutput} actual={run.stdout} />}
+                    {lastMode === "main" && run.compiled && ch.sampleOutput && run.exitCode === 0 && !stdin.trim() && (!guide || stepsDone) && <ExpectedOutput expected={ch.sampleOutput} actual={run.stdout} />}
+                    {lastMode === "main" && run.compiled && run.exitCode === 0 && guide && !stepsDone && !stdin.trim() && (
+                      <p className="mt-3 rounded-xl border border-sep bg-card2 px-3.5 py-2.5 text-[13px] leading-snug text-label2">
+                        The finished program prints something different from this on purpose: you are still partway through the steps, so its output is not the goal yet. Press <b className="font-semibold text-label">Check step</b> in the Steps tab to see how far you are. The output is compared once every step passes.
+                      </p>
+                    )}
                   </div>
                 )}
               </>)}
