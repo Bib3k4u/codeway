@@ -43,7 +43,11 @@ public class AttemptService {
         List<Attempt> open = attempts.findByUserIdAndSubmittedAtIsNullOrderByStartedAtDesc(userId);
         Map<Long, Challenge> chOf = new HashMap<>();
         Map<Long, Challenge> openChallenges = ChallengeService.byId(challenges, open.stream().map(o -> o.challengeId).toList());
-        for (Attempt o : open) { Challenge c = openChallenges.get(o.challengeId); if (c != null) chOf.put(o.id, c); }
+        for (Attempt o : open) {
+            Challenge c = openChallenges.get(o.challengeId);
+            // a guided exercise from before design patterns moved to the normal exercises is not resumed: the learner gets a fresh one
+            if (c != null && !(c.guideJson != null && !catalog.isGuided(c.concept))) chOf.put(o.id, c);
+        }
 
         // The question the learner is on for this concept is the most recently active open attempt, in any language.
         // Switching language keeps that question: resume it in the new language, or translate it.

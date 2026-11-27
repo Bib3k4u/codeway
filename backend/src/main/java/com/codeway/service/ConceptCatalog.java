@@ -60,21 +60,22 @@ public class ConceptCatalog {
             new Concept("rate-limiter", "lld", null, "Rate limiter", "Token bucket and sliding window, behind one interface.", "gauge"));
 
     /**
-     * Patterns with guided practice: diagnose the principle a piece of code breaks, then refactor it step by step into the
-     * pattern. Every pattern in the track has one. Each has a hand-written anchor scenario under resources/patterns.
+     * Patterns with the guided "diagnose, then refactor in steps" practice. Empty on purpose: learners found it long and hard to follow,
+     * so design patterns now use the same generated, difficulty-scaled exercises as the SOLID principles. The hand-written scenarios under
+     * resources/patterns and the guided screens stay for attempts already in progress; list a concept id here to bring them back.
      */
-    public static final Set<String> GUIDED = Set.of("singleton", "factory-method", "builder", "adapter", "decorator", "facade", "strategy", "observer", "command", "state");
+    public static final Set<String> GUIDED = Set.of();
 
     public boolean isGuided(String conceptId) { return GUIDED.contains(conceptId); }
 
     /**
      * From SOLID on, the main file is written for the learner (the demo of how the classes are used) and is read-only: the learner
      * writes only the other classes, and the hidden tests don't depend on it. Until OOP is done the learner writes their own main.
-     * Guided design-pattern challenges ship their own working main and are left alone.
+     * Guided challenges (see GUIDED) ship their own working main and are left alone.
      */
     public boolean mainProvided(String conceptId) {
         var c = find("java", conceptId);
-        return c.isPresent() && ("solid".equals(c.get().track()) || "lld".equals(c.get().track())) && !isGuided(conceptId);
+        return c.isPresent() && ("solid".equals(c.get().track()) || "patterns".equals(c.get().track()) || "lld".equals(c.get().track())) && !isGuided(conceptId);
     }
 
     /**
@@ -132,8 +133,6 @@ public class ConceptCatalog {
         if (!LANGUAGES.contains(language)) return false;
         var c = find(language, conceptId);
         if (c.isEmpty()) return false;
-        // in the patterns track only concepts with a hand-written anchor scenario have practice
-        if ("patterns".equals(c.get().track())) return GUIDED.contains(conceptId);
         return track(c.get().track()).map(Track::practice).orElse(false);
     }
 }

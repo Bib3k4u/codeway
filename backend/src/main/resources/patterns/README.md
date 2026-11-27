@@ -1,3 +1,8 @@
+> **Switched off.** Design patterns are now practised with the same generated, difficulty-scaled exercises as the SOLID principles
+> (see `ChallengeService.patternRules`), because the guided "diagnose, then refactor in steps" lab was too long for beginners.
+> `ConceptCatalog.GUIDED` is empty, so nothing here is served; the scenarios are still validated by `PatternScenariosTest` and kept so the
+> lab can come back by listing a concept id there. Attempts already open on a guided exercise are not resumed: the learner gets a fresh one.
+
 # Guided design-pattern scenarios
 
 Each folder here is one hand-written **anchor scenario**. The server validates it at startup (like AI output), serves it to

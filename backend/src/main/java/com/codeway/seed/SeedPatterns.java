@@ -20,7 +20,8 @@ import java.security.MessageDigest;
 import java.util.*;
 
 /**
- * The hand-written anchor scenarios for guided design-pattern practice, read from resources/patterns:
+ * The hand-written anchor scenarios for guided design-pattern practice (only the concepts listed in {@link ConceptCatalog#GUIDED} are served;
+ * while that set is empty this retires what was served before), read from resources/patterns:
  *
  * <pre>
  * patterns/&lt;id&gt;/scenario.json      concept, title, difficulty, scaffolding, expectedMinutes, hints[], guide{quiz{question,explanation}, steps[], reveal{}}
@@ -52,7 +53,7 @@ public class SeedPatterns implements ApplicationRunner {
 
     private void seed() {
         List<Challenge> all;
-        try { all = load(null); } catch (Exception e) { System.err.println("[seed-pattern] could not read scenarios: " + e.getMessage()); return; }
+        try { all = load(null).stream().filter(c -> ConceptCatalog.GUIDED.contains(c.concept)).toList(); } catch (Exception e) { System.err.println("[seed-pattern] could not read scenarios: " + e.getMessage()); return; }
         for (Challenge c : all) {
             try {
                 var existing = repo.findByTitleAndLanguageAndOrigin(c.title, c.language, ORIGIN);

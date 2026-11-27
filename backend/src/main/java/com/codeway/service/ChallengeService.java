@@ -62,7 +62,9 @@ public class ChallengeService {
     }
 
     private List<Challenge> bank(String language, String concept) {
-        return challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).stream().filter(ChallengeService::current).toList();
+        boolean guided = catalog.isGuided(concept);
+        return challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).stream().filter(ChallengeService::current)
+                .filter(c -> guided || c.guideJson == null).toList();      // guided exercises are only served for concepts that still use them
     }
 
     /** Adds the five principle options and our answer key to a guide that only has the question and explanation. */
@@ -816,7 +818,8 @@ public class ChallengeService {
      * What a good exercise looks like for each track. OOP exercises build a feature; SOLID exercises are design work:
      * fix or finish a design so it follows the principle, with tests that check the design as well as the behaviour.
      */
-    static String trackRules(ConceptCatalog.Concept c, Lang lang) {
+    static String trackRules(ConceptCatalog.Concept c, Lang lang, int difficulty) {
+        if ("patterns".equals(c.track())) return patternRules(c, lang, difficulty);
         if (!"solid".equals(c.track())) return "";
         String design = switch (c.id()) {
             case "single-responsibility" -> "A class that mixes several jobs (e.g. calculating, formatting and saving a report). The learner splits it so each class has one reason to change. Tests check each new class does its one job, and that the original entry point still produces the same result by delegating.";
@@ -841,6 +844,61 @@ public class ChallengeService {
                 in descriptionMd (interfaces, classes, constructor parameters). %s
                 Add a "## Why" section to descriptionMd (2-3 sentences: what goes wrong with the original design and what the principle buys).
                 """.formatted(c.title(), c.summary(), design, checks);
+    }
+
+    /** How big a design-pattern exercise may be at each difficulty: the first ones must be small enough for a beginner to read in a minute. */
+    static String patternSize(int difficulty) {
+        return switch (Math.max(1, Math.min(5, difficulty))) {
+            case 1 -> "SIZE (difficulty 1, a first exercise): ONE small problem in an everyday setting (a shop, a school, a game). At most 3 classes besides the main file, about 30 lines in total, two or three tests. The learner makes ONE change to apply the pattern. No extra requirements.";
+            case 2 -> "SIZE (difficulty 2): one problem, at most 4 classes besides the main file, about 45 lines in total, three or four tests. The learner applies the pattern and checks one simple edge case.";
+            case 3 -> "SIZE (difficulty 3): at most 5 classes besides the main file, about 70 lines in total. The learner applies the pattern and handles one extra requirement (an unknown input, a default, a second kind of object).";
+            case 4 -> "SIZE (difficulty 4): a realistic mini-system of at most 6 classes besides the main file. The learner applies the pattern and one extra requirement that needs thought (ordering, undo, a failure that must be reported).";
+            default -> "SIZE (difficulty 5): a realistic mini-system. The learner applies the pattern, handles two extra requirements and keeps every old behaviour working.";
+        };
+    }
+
+    /**
+     * Design-pattern exercises are SOLID-style design work: working code that has the problem the pattern solves, and the learner reshapes it.
+     * Tests check behaviour (including a new variant written in the test file), never the text of the learner's source.
+     */
+    static String patternRules(ConceptCatalog.Concept c, Lang lang, int difficulty) {
+        String design = switch (c.id()) {
+            case "singleton" -> "Several parts of a program each create their own copy of something that must exist once (a settings holder, a visit counter, a registry), so the copies disagree. The learner makes exactly one shared instance with a getInstance method and a private constructor, and makes the parts use it. Tests: getInstance returns the same object every time; two different users of it see the same data; the constructor is not public (checked by the test); the old public methods still work. The one instance lives for the whole run, so tests must NEVER assume it is fresh: compare against the value they read first, and never rely on the order tests run in. Do not add reset or test-only methods.";
+            case "factory-method" -> "Client code picks and builds concrete classes itself with new and an if/switch on a string or code. The learner moves the creation into a factory (a factory method) so the client only asks for 'a thing' and receives the shared interface. Tests: each kind is created correctly, an unknown kind is rejected as the description says, and a new kind written in the test file can be produced by a new creator without editing the existing factory.";
+            case "builder" -> "A class whose constructor takes many parameters of the same type, so calls are unreadable and easy to get wrong. The learner adds a builder with named, chainable setter methods and a build method that creates the object (and rejects a missing required value if the description says so). Tests: building with only some fields set gives the documented defaults; chaining works; a missing required field is rejected with the exception the description names; two builds give independent objects.";
+            case "adapter" -> "The app is written against its own small interface, but the class it must use (given, treated as a library that cannot be edited) has different method names or units. The learner writes an adapter that implements the app's interface and delegates to the given class. Tests: the adapter can be used wherever the app's interface is expected, values are converted as the description says, and a fake given class written in the test file can be wrapped too.";
+            case "decorator" -> "Extra features are added by making a subclass for every combination (so the number of classes explodes), or by flags and if-statements inside one class. The learner adds wrappers that implement the same interface and add one feature each, stackable in any order. Tests: each wrapper alone, two or three stacked, the order where it matters, and a new wrapper written in the test file stacks with the existing ones unchanged.";
+            case "facade" -> "To do one common job, calling code must call several separate classes in the right order with the right arguments. The learner writes one facade class with a single easy method that does the whole job, and the calling code uses only that. Tests: the facade method gives the documented result and the steps happen in the order the description says (the subsystem classes record calls in a list the test can read); the original classes still work on their own.";
+            case "strategy" -> "A class picks an algorithm with an if/else or switch on a type code (shipping cost, discount, sorting rule). The learner moves each algorithm into its own class behind one interface and lets the class use whichever one it is given. Tests: every existing choice gives the same result as before, the choice can be swapped while the program runs, and a new algorithm written in the test file works without editing the original class.";
+            case "observer" -> "A class that changes (a price, a score, a temperature) calls specific other classes by name when it does, so adding another listener means editing it. The learner adds a listener interface with subscribe and unsubscribe so the subject notifies whoever is registered. Tests: every subscribed listener hears the change, an unsubscribed listener does not, and a new listener written in the test file works without editing the subject.";
+            case "command" -> "A class does actions through a big if/switch on an action name, and cannot undo anything. The learner turns each action into its own command object with execute (and undo where the description says) and lets the caller run, keep and undo commands. Tests: each command does its job, undo restores the earlier state, history works as the description says, and a new command written in the test file works with the existing caller unchanged.";
+            case "state" -> "An object behaves differently depending on a status field and every method is full of if/else on that status. The learner moves each status's behaviour into its own state class and lets the object hand work to its current state. Tests: each status behaves as described, moving between statuses works, an action that is not allowed in a status is rejected as the description says, and a new status written in the test file can be plugged in without editing the others.";
+            default -> "A design that the pattern improves; the learner applies it.";
+        };
+        return """
+                This is a DESIGN PATTERNS exercise about "%1$s": %2$s
+                The learner has just read the lesson on this pattern and is a beginner: the exercise must be easy to read and clearly small. %3$s
+                The problem: %4$s
+                How it is built:
+                - The starter is realistic, WORKING code that has the problem. It compiles and runs from the start. The main file (provided, read-only) shows how the classes
+                  are used and prints a few lines; it keeps working after the refactor. The learner edits the other files. Put an empty stub in the starter for every NEW type the
+                  tests use, with a TODO naming what to write there.
+                - descriptionMd names the pattern ("%1$s"), tells a short everyday story about the problem, says which behaviour must keep working, and lists the exact class and method
+                  names the tests use. Say in one plain sentence why the pattern helps. Use everyday words, no jargon; short sentences.
+                - Each test is independent: it passes or fails only because of the thing its name says, never because of what another test did or the order tests run in, and never
+                  because the learner finished one part of the task before another. A test must not use a class, method or constructor that the finished design removes or hides.
+                - Test names are short plain sentences ("Two readers see the same counter"). Every failing check uses Check.isTrue with a message in plain words that says what is wrong and which class
+                  to look at, or Check.eq on small values. No methods that exist only for tests.
+                - %5$s
+                Add a "## Why" section to descriptionMd (2-3 sentences: what goes wrong in the original design and what %1$s buys).
+                """.formatted(c.title(), c.summary(), patternSize(difficulty), design,
+                switch (lang) {
+                    case JAVA -> "Design checks in Java may use reflection (e.g. a constructor is private: `Modifier.isPrivate(X.class.getDeclaredConstructor().getModifiers())`) or a class written in the test file; the learner never needs reflection.";
+                    case PYTHON -> "Design checks in Python may use isinstance, abc, or a class defined in the test file.";
+                    case JAVASCRIPT -> "Design checks in JavaScript may use instanceof, identity (===) or a class defined in the test file.";
+                    case CPP -> "Design checks in C++ must be at run time: compare addresses, use dynamic_cast or a class defined in the test file (no static_assert).";
+                    case CSHARP -> "Design checks in C# may use ReferenceEquals, typeof(...).GetConstructor(...) or a class defined in the test file.";
+                });
     }
 
     private static String userPrompt(Lang lang, ConceptCatalog.Concept c, int difficulty, String scaffolding, String avoid, String teaching, boolean mainProvided) {
@@ -895,6 +953,6 @@ public class ChallengeService {
                 - Directly under the Example block add a short "Format:" bullet list that removes all guesswork about printing:
                   one item per printed line pattern, saying exactly what goes on each line, separators (e.g. ": " with one space),
                   number formatting (e.g. 2 decimal places), capitalisation, and that each item is on its own line.
-                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang), teaching, mainRule.formatted(lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile));
+                """.formatted(lang.label, concept, difficulty, scaffoldRule, avoid.isBlank() ? "none" : avoid, lang.mainFile, lang.testFile, langRules(lang), trackRules(c, lang, difficulty), teaching, mainRule.formatted(lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile, lang.mainFile));
     }
 }
