@@ -84,4 +84,42 @@ class PatternPracticeTest {
         assertTrue(rules.contains("Do NOT use strings or type codes"));
         assertTrue(rules.contains("Supplier"));
     }
+
+    // ---- nothing untaught in a beginner exercise ----
+    private static com.codeway.domain.Challenge bookShop(int difficulty, String description, String factory) {
+        var c = new com.codeway.domain.Challenge();
+        c.language = "java"; c.origin = "ai"; c.difficulty = difficulty; c.descriptionMd = description;
+        c.starterFilesJson = Json.write(java.util.Map.of("BookFactory.java", factory));
+        c.referenceSolutionJson = Json.write(java.util.Map.of("BookFactory.java", factory));
+        c.testsJson = Json.write(java.util.Map.of("TestMain.java", "public class TestMain { public static void main(String[] a) { Check.run(\"x\", () -> { Check.eq(1, 1); }); } }"));
+        return c;
+    }
+
+    private static final String FUNCTION_FACTORY = """
+            import java.util.HashMap;
+            import java.util.Map;
+            import java.util.function.Function;
+            public class BookFactory {
+                private final Map<String, Function<String, Book>> registered = new HashMap<>();
+                public BookFactory() { registered.put("novel", Novel::new); }
+                public Book createBook(String kind, String title) { return registered.get(kind).apply(title); }
+            }
+            """;
+
+    @Test void aBeginnerStarterThatUsesFunctionObjectsIsRejectedAndNotServed() {
+        var c = bookShop(1, "Use `BookFactory.createBook(String, String)`.", FUNCTION_FACTORY);
+        String why = ChallengeService.untaughtConstructs(c);
+        assertNotNull(why);
+        assertTrue(why.contains("Function"), why);
+        assertTrue(ChallengeService.retired(c, false));
+    }
+
+    @Test void theSameCodeIsFineAtALaterLevelOrWhenTheBriefTeachesIt() {
+        assertNull(ChallengeService.untaughtConstructs(bookShop(4, "Use `BookFactory`.", FUNCTION_FACTORY)));
+        assertNull(ChallengeService.untaughtConstructs(bookShop(2, "## New in this challenge\n`Function<String, Book>` is an object that turns a title into a Book; `Novel::new` means 'make a Novel'.", FUNCTION_FACTORY)));
+    }
+
+    @Test void plainClassesPass() {
+        assertNull(ChallengeService.untaughtConstructs(bookShop(1, "Use it.", "public class BookFactory { public Book createBook(String kind) { switch (kind) { case \"novel\": return new Novel(); default: throw new IllegalArgumentException(kind); } } }")));
+    }
 }

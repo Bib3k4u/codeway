@@ -290,6 +290,8 @@ public class ChallengeService {
         if (stale != null) return stale;
         String hidden = undeclaredApi(ch);
         if (hidden != null) return hidden;
+        String untaught = untaughtConstructs(ch);
+        if (untaught != null) return untaught;
 
         Set<String> given = new HashSet<>();                       // lines the learner is handed anyway
         starter.values().forEach(t -> t.lines().forEach(l -> given.add(squash(l))));
@@ -342,10 +344,51 @@ public class ChallengeService {
         }
     }
 
+    private static final Map<Lang, Pattern> ADVANCED = Map.of(
+            Lang.JAVA, Pattern.compile("\\b(Function|BiFunction|Supplier|Consumer|BiConsumer|Predicate|UnaryOperator|BinaryOperator|Callable)\\s*<|[A-Za-z_]\\w*::[A-Za-z_]|\\.stream\\(\\)|\\bOptional\\b"),
+            Lang.PYTHON, Pattern.compile("\\blambda\\b|\\bCallable\\b"),
+            Lang.CSHARP, Pattern.compile("\\b(Func|Action|Predicate)\\s*<"),
+            Lang.CPP, Pattern.compile("std::function|\\[[&=]?\\]\\s*\\("));
+    private static final Pattern ADVANCED_NAME = Pattern.compile("java\\.util\\.function|Function|BiFunction|Supplier|Consumer|BiConsumer|Predicate|UnaryOperator|BinaryOperator|Callable|Optional|lambda|Func|Action|std::function");
+
+    /**
+     * Levels 1 to 3 are for people still learning classes and interfaces. Function and Supplier objects, lambdas, method references and streams
+     * are taught nowhere on the path before them, so a starter or solution that uses them hands the learner code they cannot read, let alone write.
+     * Allowed only when descriptionMd names the construct (the "New in this challenge" section explains it). Null when fine, otherwise what to change.
+     */
+    static String untaughtConstructs(Challenge ch) {
+        try {
+            if (ch.difficulty > 3) return null;
+            Lang lang = Lang.of(ch.language);
+            Pattern advanced = ADVANCED.get(lang);
+            if (advanced == null) return null;
+            String brief = ch.descriptionMd == null ? "" : ch.descriptionMd;
+            for (var group : List.of(Json.files(ch.starterFilesJson), Json.files(ch.referenceSolutionJson))) {
+                for (var e : group.entrySet()) {
+                    if (e.getKey().equals(lang.testFile)) continue;
+                    String code = STRING_LITERAL.matcher(stripComments(e.getValue(), lang)).replaceAll("\"\"");
+                    var m = advanced.matcher(code);
+                    while (m.find()) {
+                        var name = ADVANCED_NAME.matcher(m.group()).results().map(r -> r.group()).findFirst().orElse(m.group().strip());
+                        if (m.group().contains("::") && !m.group().startsWith("std::")) name = "::";
+                        if (!"::".equals(name) && mentions(brief, name)) continue;
+                        if ("::".equals(name) && brief.contains("::")) continue;
+                        return e.getKey() + " uses `" + m.group().strip() + "` (Function/Supplier objects, lambdas, method references, streams and Optional are not taught before this level). "
+                                + "Rewrite it with only classes, interfaces, inheritance, fields and plain methods: for example a switch or if/else on the kind, or one small class per kind. "
+                                + "A new kind must be added by writing a class, never by passing a lambda or registering a creator function";
+                    }
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /** A challenge nobody should be sent back to, even to resume it: a guided exercise whose concept no longer uses them, or tests that need a name the brief never gives. */
     public static boolean retired(Challenge c, boolean guidedConcept) {
         if (c.guideJson != null) return !guidedConcept;
-        return "ai".equals(c.origin) && undeclaredApi(c) != null;
+        return "ai".equals(c.origin) && (undeclaredApi(c) != null || untaughtConstructs(c) != null);
     }
 
     /** Whether a stored challenge may still be served: made under the current rules, not a retired guided exercise, and the tests only use what the brief names. */
