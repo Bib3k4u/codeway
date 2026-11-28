@@ -63,8 +63,7 @@ public class ChallengeService {
 
     private List<Challenge> bank(String language, String concept) {
         boolean guided = catalog.isGuided(concept);
-        return challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).stream().filter(ChallengeService::current)
-                .filter(c -> guided || c.guideJson == null).toList();      // guided exercises are only served for concepts that still use them
+        return challenges.findByLanguageAndConceptAndValidatedTrue(language, concept).stream().filter(c -> servable(c, guided)).toList();   // guided exercises are only served for concepts that still use them
     }
 
     /** Adds the five principle options and our answer key to a guide that only has the question and explanation. */
@@ -289,6 +288,8 @@ public class ChallengeService {
         if (reads != null) return "the tests read source files as text. Check behaviour instead (run the code, use a fake, add a new subclass in the test): a text search fails on comments and on words that merely contain `if` or `switch`";
         String stale = staleTodo(ch, lang, starter);
         if (stale != null) return stale;
+        String hidden = undeclaredApi(ch);
+        if (hidden != null) return hidden;
 
         Set<String> given = new HashSet<>();                       // lines the learner is handed anyway
         starter.values().forEach(t -> t.lines().forEach(l -> given.add(squash(l))));
@@ -303,6 +304,54 @@ public class ChallengeService {
             }
         }
         return null;
+    }
+
+    private static final Pattern MEMBER = Pattern.compile("(?:\\.|::|->)\\s*([A-Za-z_]\\w*)");
+    private static final Pattern STRING_LITERAL = Pattern.compile("\"(?:[^\"\\\\\\n]|\\\\.)*\"");
+
+    private static boolean mentions(String text, String name) { return Pattern.compile("(?<![\\w])" + Pattern.quote(name) + "(?![\\w])").matcher(text).find(); }
+
+    /**
+     * The learner can only write what the brief or the starter tells them. A test that calls a method or field the solution has but neither
+     * of those names (a registry, a helper, a setter) can never be passed by guessing, and shows the learner "cannot find symbol" for a name
+     * they were never given. Null when every member the tests use is named, otherwise what to fix.
+     */
+    static String undeclaredApi(Challenge ch) {
+        try {
+            Lang lang = Lang.of(ch.language);
+            String test = Json.files(ch.testsJson).values().stream().collect(Collectors.joining("\n"));
+            String starter = Json.files(ch.starterFilesJson).entrySet().stream().filter(e -> !e.getKey().equals(lang.testFile)).map(Map.Entry::getValue).collect(Collectors.joining("\n"));
+            String ref = Json.files(ch.referenceSolutionJson).entrySet().stream().filter(e -> !e.getKey().equals(lang.testFile)).map(Map.Entry::getValue).collect(Collectors.joining("\n"));
+            String brief = ch.descriptionMd == null ? "" : ch.descriptionMd;
+            String code = STRING_LITERAL.matcher(stripComments(test, lang)).replaceAll("\"\"");
+            Set<String> seen = new LinkedHashSet<>(), bad = new LinkedHashSet<>();
+            var m = MEMBER.matcher(code);
+            while (m.find()) seen.add(m.group(1));
+            String refCode = STRING_LITERAL.matcher(stripComments(ref, lang)).replaceAll("\"\"");
+            for (String name : seen) {
+                if (name.length() < 3 || mentions(starter, name) || mentions(brief, name)) continue;
+                if (Pattern.compile("(?<![\\w.:>])" + Pattern.quote(name) + "(?![\\w])").matcher(code).find()) continue;     // the test declares it itself
+                if (Pattern.compile("(?<![\\w.:>])" + Pattern.quote(name) + "(?![\\w])").matcher(refCode).find()) bad.add(name);   // the solution declares it
+            }
+            if (bad.isEmpty()) return null;
+            return "the tests use " + bad.stream().limit(4).map(n -> "`" + n + "`").collect(Collectors.joining(", ")) + ", which neither descriptionMd nor the starter files mention, so the learner cannot know to write it. "
+                    + "Either give it in \"## Requirements\" with its exact signature (and put a stub in the starter), or do not use it in the tests. Prefer a design the learner can finish "
+                    + "with only what the lesson teaches (no registries of lambdas, Supplier or Function objects, or helper methods the lesson never shows)";
+        } catch (Exception e) {
+            return null;     // a check that cannot run never blocks an exercise
+        }
+    }
+
+    /** A challenge nobody should be sent back to, even to resume it: a guided exercise whose concept no longer uses them, or tests that need a name the brief never gives. */
+    public static boolean retired(Challenge c, boolean guidedConcept) {
+        if (c.guideJson != null) return !guidedConcept;
+        return "ai".equals(c.origin) && undeclaredApi(c) != null;
+    }
+
+    /** Whether a stored challenge may still be served: made under the current rules, not a retired guided exercise, and the tests only use what the brief names. */
+    static boolean servable(Challenge c, boolean guidedConcept) {
+        if (!current(c)) return false;
+        return !retired(c, guidedConcept);
     }
 
     private static final Pattern SOURCE_READ = Pattern.compile("(?i)(Files\\.(readAll|readString|lines|newBufferedReader)|Paths?\\.(get|of)\\(|new File\\(|FileReader|\\breadAllBytes|\\breadString|fs\\.(readFile|existsSync|readdir)|require\\(['\"]fs['\"]\\)|open\\(['\"][^'\"]*\\.(py|js)|ifstream|fopen\\(|File\\.(ReadAll|Open)|StreamReader)");
@@ -712,7 +761,7 @@ public class ChallengeService {
                 if (seen.size() == 4) break;
             }
             var friendly = seen.stream().map(m -> new RunResult.Diagnostic("", 0, "error",
-                    "The tests can't build against your code yet: " + m + ". Check the class, method and field names and signatures against the Requirements in the brief.")).toList();
+                    "The tests can't build against your code yet: " + m.replaceAll("[.\\s]+$", "") + ". Check the class, method and field names and signatures against the Requirements in the brief.")).toList();
             if (friendly.isEmpty()) return r;
             return new RunResult(r.compiled(), friendly, r.stdout(), r.stderr(), r.tests(), r.timedOut(), r.exitCode(), r.millis());
         }
@@ -864,7 +913,7 @@ public class ChallengeService {
     static String patternRules(ConceptCatalog.Concept c, Lang lang, int difficulty) {
         String design = switch (c.id()) {
             case "singleton" -> "Several parts of a program each create their own copy of something that must exist once (a settings holder, a visit counter, a registry), so the copies disagree. The learner makes exactly one shared instance with a getInstance method and a private constructor, and makes the parts use it. Tests: getInstance returns the same object every time; two different users of it see the same data; the constructor is not public (checked by the test); the old public methods still work. The one instance lives for the whole run, so tests must NEVER assume it is fresh: compare against the value they read first, and never rely on the order tests run in. Do not add reset or test-only methods.";
-            case "factory-method" -> "Client code picks and builds concrete classes itself with new and an if/switch on a string or code. The learner moves the creation into a factory (a factory method) so the client only asks for 'a thing' and receives the shared interface. Tests: each kind is created correctly, an unknown kind is rejected as the description says, and a new kind written in the test file can be produced by a new creator without editing the existing factory.";
+            case "factory-method" -> "A class does a job (shows an item, sends a message, plays a sound) but builds the concrete object it needs itself with new, so it is stuck with one kind. The learner makes the class abstract with an abstract creation method (the factory method) that returns the shared interface, and each concrete subclass overrides it to create its own kind. The shared job calls the factory method and never says new. Tests: each concrete subclass creates the right kind and the shared job works with it; a brand-new subclass written in the test file (with a new product also written there) works with the shared job unchanged. Do NOT use strings or type codes to pick a kind, registries or maps of lambdas, Supplier or Function objects, or any setup call (register, add, configure): the learner only writes classes and overrides one method.";
             case "builder" -> "A class whose constructor takes many parameters of the same type, so calls are unreadable and easy to get wrong. The learner adds a builder with named, chainable setter methods and a build method that creates the object (and rejects a missing required value if the description says so). Tests: building with only some fields set gives the documented defaults; chaining works; a missing required field is rejected with the exception the description names; two builds give independent objects.";
             case "adapter" -> "The app is written against its own small interface, but the class it must use (given, treated as a library that cannot be edited) has different method names or units. The learner writes an adapter that implements the app's interface and delegates to the given class. Tests: the adapter can be used wherever the app's interface is expected, values are converted as the description says, and a fake given class written in the test file can be wrapped too.";
             case "decorator" -> "Extra features are added by making a subclass for every combination (so the number of classes explodes), or by flags and if-statements inside one class. The learner adds wrappers that implement the same interface and add one feature each, stackable in any order. Tests: each wrapper alone, two or three stacked, the order where it matters, and a new wrapper written in the test file stacks with the existing ones unchanged.";
@@ -885,6 +934,8 @@ public class ChallengeService {
                   tests use, with a TODO naming what to write there.
                 - descriptionMd names the pattern ("%1$s"), tells a short everyday story about the problem, says which behaviour must keep working, and lists the exact class and method
                   names the tests use. Say in one plain sentence why the pattern helps. Use everyday words, no jargon; short sentences.
+                - The learner has only the lesson. For difficulty 1-3 use nothing beyond classes, interfaces, inheritance and plain methods: no generics tricks, lambdas, Supplier/Function, maps of
+                  functions or reflection in anything the learner must WRITE. Every class, method, constructor and field that a test uses is named in "## Requirements" with its exact signature.
                 - Each test is independent: it passes or fails only because of the thing its name says, never because of what another test did or the order tests run in, and never
                   because the learner finished one part of the task before another. A test must not use a class, method or constructor that the finished design removes or hides.
                 - Test names are short plain sentences ("Two readers see the same counter"). Every failing check uses Check.isTrue with a message in plain words that says what is wrong and which class
